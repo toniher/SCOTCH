@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import argparse
 import count_matrix as cm
 import os
@@ -132,7 +134,7 @@ def main():
         annotator.annotate_genes()
         # bam information
         logger.info('Start processing bam file information.')
-        annotator.annotation_bam(args.barcode_cell, args.barcode_umi)
+        #annotator.annotation_bam(args.barcode_cell, args.barcode_umi)
         copy_log_to_targets(log_file, args.target)
     def run_compatible():
         logger, log_file = setup_logger(args.target[0], 'compatible')

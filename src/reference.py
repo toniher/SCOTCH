@@ -22,7 +22,7 @@ def parse_info(x: str,sep=';',inner_sep = ' ')->dict:
     out = []
     for i in x:
         pair = [p for p in i.split(inner_sep) if p!='']
-        if len(pair)==2 and (pair[0] in ['gene_name','gene_id','transcript_id','gene_type']):
+        if len(pair)==2 and (pair[0] in ['gene_name','gene_id','transcript_id','gene_biotype']):
             pair = (pair[0],pair[1].replace('\"',''))
             out.append(pair)
     return dict(out)
@@ -70,8 +70,8 @@ def generate_reference_df(gtf_path):
     outdir = os.path.dirname(gtf_path)
     _, _, df = read_gtf(gtf_path, None, ['gene', 'exon'])
     df = df.dropna(axis=0, subset=['gene_name']).reset_index(drop=True)
-    df.columns = ['CHR', 'SOURCE', 'TYPE', 'START', 'END', '.', 'STRAND', '.', 'gene_id','gene_type','gene_name',  'transcript_id']
-    df_gene = df[df.iloc[:, 2] == "gene"].loc[:, ['CHR', 'START', 'END', 'gene_id','gene_name', 'gene_type','STRAND']].reset_index(
+    df.columns = ['CHR', 'SOURCE', 'TYPE', 'START', 'END', '.', 'STRAND', '.', 'gene_id','gene_name','gene_biotype',  'transcript_id']
+    df_gene = df[df.iloc[:, 2] == "gene"].loc[:, ['CHR', 'START', 'END', 'gene_id','gene_name', 'gene_biotype','STRAND']].reset_index(
         drop=True)
     df_exon = df[df.iloc[:, 2] == "exon"].loc[:, ['CHR', 'START', 'END','gene_id', 'gene_name', 'transcript_id']].reset_index(
         drop=True)
