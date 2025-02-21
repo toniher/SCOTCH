@@ -844,6 +844,7 @@ def extract_annotation_info(
         print(genes)
         print(Genes)
         # generate single gene annotations if not existing
+        # TODO: Check why it seems stuck in Parallel
         if os.path.isfile(output) == False:
             geneStructureInformation = Parallel(n_jobs=num_cores)(
                 delayed(process_gene)(geneID, geneName, genes, exons, build)
