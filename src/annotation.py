@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from collections import defaultdict
 import pysam
 from joblib import Parallel, delayed
@@ -593,6 +595,8 @@ def extract_annotation_info(refGeneFile_gtf_path, refGeneFile_pkl_path, bamfile_
     if refGeneFile_pkl_path is None and refGeneFile_gtf_path is not None: ###use gtf
         print('use the existing gtf file for gene annotations')
         Genes = list(zip(genes.iloc[:, 3].tolist(), genes.iloc[:, 4].tolist()))  # id, name
+        print(genes)
+        print(Genes)
         #generate single gene annotations if not existing
         if os.path.isfile(output) == False:
             geneStructureInformation = Parallel(n_jobs=num_cores)(delayed(process_gene)(geneID, geneName, genes, exons, build) for geneID, geneName in Genes)
