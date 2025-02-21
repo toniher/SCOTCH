@@ -45,8 +45,10 @@ def lines2df(lines: list, sep=";", inner_sep=" ", parse=True):
 
 
 def read_gtf(path, N, condition=None):
+    df = None
     header = []
     lines = []
+    print(path)
     with open(path, "rt") as file:
         if N is not None:
             for i in range(N):
@@ -69,13 +71,20 @@ def read_gtf(path, N, condition=None):
                             lines.append(line)
                     else:
                         lines.append(line)
-        df = lines2df(lines, parse=True)
+        if len(lines) > 0:
+            df = lines2df(lines, parse=True)
     return header, lines, df
 
 
 def generate_reference_df(gtf_path):
     outdir = os.path.dirname(gtf_path)
+    print(gtf_path)
     _, _, df = read_gtf(gtf_path, None, ["gene", "exon"])
+    if df is None:
+        print("NO CONTENT in GTF!")
+        import sys
+
+        sys.exit(1)
     df = df.dropna(axis=0, subset=["gene_name"]).reset_index(drop=True)
     df.columns = [
         "CHR",
