@@ -842,11 +842,12 @@ def extract_annotation_info(
             zip(genes.iloc[:, 3].tolist(), genes.iloc[:, 4].tolist())
         )  # id, name
         print("STARTING TRICKY PART")
-        print(genes)
-        print(Genes)
+        # print(genes)
+        # print(Genes)
         # generate single gene annotations if not existing
         # TODO: Check why it seems stuck in Parallel
         if not os.path.isfile(output):
+            print("In")
             print(num_cores)
             geneStructureInformation = Parallel(n_jobs=num_cores)(
                 delayed(process_gene)(geneID, geneName, genes, exons, build)
