@@ -793,6 +793,7 @@ def extract_annotation_info(
     coverage_threshold_splicing=0.01,
     z_score_threshold=10,
     min_gene_size=50,
+    logger
 ):
     """
     wrapper function to extract gene annotation information including exons and isoforms
@@ -819,7 +820,7 @@ def extract_annotation_info(
         and refGeneFile_pkl_path is None
         and bamfile_path is not None
     ):
-        print("rely on bam file alone to generate gene annotations")
+        logger.info("rely on bam file alone to generate gene annotations")
         geneStructureInformation = annotate_genes(
             geneStructureInformation=None,
             bamfile_path=bamfile_path,
@@ -837,18 +838,18 @@ def extract_annotation_info(
     # option2: --------rely on existing annotation alone#
     #####################################################
     if refGeneFile_pkl_path is None and refGeneFile_gtf_path is not None:  ###use gtf
-        print("use the existing gtf file for gene annotations")
+        logger.info("use the existing gtf file for gene annotations")
         Genes = list(
             zip(genes.iloc[:, 3].tolist(), genes.iloc[:, 4].tolist())
         )  # id, name
-        print("STARTING TRICKY PART")
-        # print(genes)
-        # print(Genes)
+        logger.info("STARTING TRICKY PART")
+        logger.info(genes)
+        logger.info(Genes)
         # generate single gene annotations if not existing
         # TODO: Check why it seems stuck in Parallel
         if not os.path.isfile(output):
-            print("In")
-            print(num_cores)
+            logger.info("In")
+            logger.info(num_cores)
             geneStructureInformation = Parallel(n_jobs=num_cores)(
                 delayed(process_gene)(geneID, geneName, genes, exons, build)
                 for geneID, geneName in Genes
@@ -861,7 +862,7 @@ def extract_annotation_info(
                 with open(output, "wb") as file:
                     pickle.dump(geneStructureInformation, file)
         else:  # there exist pre-computate annotation file
-            print(
+            logger.info(
                 "load existing annotation pickle file of each single gene at: "
                 + str(output)
             )
@@ -870,7 +871,7 @@ def extract_annotation_info(
         assert refGeneFile_gtf_path is not None, (
             "gtf reference file is still needed! please input one"
         )
-        print(
+        logger.info(
             "load existing annotation pickle file of each single gene at: "
             + str(refGeneFile_gtf_path)
         )
@@ -886,10 +887,10 @@ def extract_annotation_info(
         # option3: ---------update existing annotation using bam file##
         ##############################################################
         if bamfile_path is not None:
-            print("rely on bam file to update existing gene annotations")
+            logger.info("rely on bam file to update existing gene annotations")
             output_update = output[:-4] + "updated.pkl"
             if os.path.isfile(output_update):
-                print("enhanced gene annotation already exist")
+                logger.info("enhanced gene annotation already exist")
                 geneStructureInformation = load_pickle(output_update)
             else:
                 geneStructureInformation = annotate_genes(
@@ -907,7 +908,7 @@ def extract_annotation_info(
                         pickle.dump(geneStructureInformation, file)
     #########group genes into meta-genes########
     if os.path.isfile(meta_output) == False:
-        print("meta gene information does not exist, will generate.")
+        logger.info("meta gene information does not exist, will generate.")
         if genes is None:  # bam generated reference
             geneIDs = list(geneStructureInformation.keys())
             rows = []
@@ -950,7 +951,7 @@ def extract_annotation_info(
         with open(meta_output, "wb") as file:
             pickle.dump(metageneStructureInformation, file)
     else:
-        print("load existing annotation pickle file of meta-gene")
+        logger.info("load existing annotation pickle file of meta-gene")
         metageneStructureInformation = load_pickle(meta_output)
     return metageneStructureInformation
 
@@ -1062,6 +1063,7 @@ class Annotator:
                             self.coverage_threshold_splicing,
                             self.z_score_threshold,
                             self.min_gene_size,
+                            self.logger,
                         )
                     if self.update_gtf:
                         self.logger.info(
@@ -1079,6 +1081,7 @@ class Annotator:
                             self.coverage_threshold_splicing,
                             self.z_score_threshold,
                             self.min_gene_size,
+                            self.logger,
                         )
                     else:
                         self.logger.info(
@@ -1096,6 +1099,7 @@ class Annotator:
                             self.coverage_threshold_splicing,
                             self.z_score_threshold,
                             self.min_gene_size,
+                            self.logger,
                         )
                 else:
                     # Copy the generated files from the first target to the current target
