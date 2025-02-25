@@ -132,7 +132,7 @@ def main():
                                     logger=logger)
         # generate gene annotation
         logger.info('Start generating gene annotation.')
-        annotator.annotate_genes()
+        #annotator.annotate_genes()
 
         # bam information
         if not args.no_bam_annotation:
