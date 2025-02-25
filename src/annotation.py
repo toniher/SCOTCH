@@ -169,41 +169,52 @@ def bam_info_to_dict(bam_info, parse=False):
         qname_sample_dict = dict(zip(bam_info["QNAME"], bam_info["SAMPLE"]))
     return qname_dict, qname_cbumi_dict, qname_sample_dict
 
-
-def process_gene(geneID, geneName, genes, exons, build=None):
-    GeneDf = genes[genes.iloc[:, 3] == geneID].reset_index(drop=True)
-    ExonsDf = exons[exons.iloc[:, 3] == geneID].reset_index(drop=True)
-    exonsdf = ExonsDf.iloc[:, :3].drop_duplicates().reset_index(drop=True)
-    exonsdf["exon_num"] = list(range(exonsdf.shape[0]))
-    geneChr, geneStart, geneEnd = (
-        GeneDf.iloc[0, 0],
-        GeneDf.iloc[0, 1],
-        GeneDf.iloc[0, 2],
-    )
-    if build is not None:
-        geneChr = str(build) + "_" + str(geneChr)
-    geneStrand = GeneDf.iloc[0, 6]
-    isoformNames = ExonsDf.TRANSCRIPT.unique().tolist()
-    GeneInfo = {
+def process_gene(
+    geneID, 
+    geneName, 
+    genes, 
+    exons, 
+    build=None
+):
+    # Filter genes and exons by geneID
+    gene_df = genes[genes.iloc[:, 3] == geneID].reset_index(drop=True)
+    exon_df = exons[exons.iloc[:, 3] == geneID].reset_index(drop=True)
+    
+    if gene_df.empty or exon_df.empty:
+        raise ValueError(f"GeneID {geneID} not found in genes or exons DataFrame.")
+    
+    # Process exons
+    unique_exons = exon_df.iloc[:, :3].drop_duplicates().reset_index(drop=True)
+    unique_exons["exon_num"] = range(unique_exons.shape[0])
+    
+    # Extract gene information
+    gene_chr, gene_start, gene_end = gene_df.iloc[0, [0, 1, 2]]
+    if build:
+        gene_chr = f"{build}_{gene_chr}"
+    gene_strand = gene_df.iloc[0, 6]
+    isoform_names = exon_df["TRANSCRIPT"].unique().tolist()
+    
+    gene_info = {
         "geneName": geneName,
         "geneID": geneID,
-        "geneChr": geneChr,
-        "geneStart": geneStart,
-        "geneEnd": geneEnd,
-        "geneStrand": geneStrand,
-        "numofExons": exonsdf.shape[0],
-        "numofIsoforms": len(isoformNames),
-        "isoformNames": isoformNames,
+        "geneChr": gene_chr,
+        "geneStart": gene_start,
+        "geneEnd": gene_end,
+        "geneStrand": gene_strand,
+        "numofExons": unique_exons.shape[0],
+        "numofIsoforms": len(isoform_names),
+        "isoformNames": isoform_names,
     }
-    ExonPositions = list(zip(exonsdf.iloc[:, 1], exonsdf.iloc[:, 2]))
-    ExonsDf = ExonsDf.merge(exonsdf, how="left")
-    ExonIsoformDict = dict()
-    for isoform in isoformNames:
-        ExonIsoformDict[isoform] = ExonsDf[
-            ExonsDf.TRANSCRIPT == isoform
-        ].exon_num.tolist()
-    return geneID, [GeneInfo, ExonPositions, ExonIsoformDict]
-
+    
+    exon_positions = list(zip(unique_exons.iloc[:, 1], unique_exons.iloc[:, 2]))
+    exon_df = exon_df.merge(unique_exons, how="left")
+    
+    exon_isoform_dict = {
+        isoform: exon_df[exon_df["TRANSCRIPT"] == isoform]["exon_num"].tolist()
+        for isoform in isoform_names
+    }
+    
+    return geneID, [gene_info, exon_positions, exon_isoform_dict]
 
 ######################################################################
 
