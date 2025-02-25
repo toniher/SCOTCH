@@ -5,6 +5,7 @@ import pickle
 import re
 import shutil
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -865,6 +866,17 @@ def extract_annotation_info(
                 geneStructureInformation.append(
                     process_gene(geneID, geneName, genes, exons, build, logger)
                 )
+
+            with ThreadPoolExecutor(max_workers=num_cores) as executor:
+                futures = [
+                    executor.submit(
+                        process_gene, geneID, geneName, genes, exons, build, logger
+                    )
+                    for geneID, geneName in Genes
+                ]
+            geneStructureInformation = [
+                future.result() for future in as_completed(futures)
+            ]
 
             # geneStructureInformation = Parallel(n_jobs=num_cores)(
             #     delayed(process_gene)(geneID, geneName, genes, exons, build, logger)
