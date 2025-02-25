@@ -170,7 +170,7 @@ def bam_info_to_dict(bam_info, parse=False):
     return qname_dict, qname_cbumi_dict, qname_sample_dict
 
 
-def process_gene(geneID, geneName, genes, exons, build=None, logger):
+def process_gene(geneID, geneName, genes, exons, build=None, logger=None):
     # Filter genes and exons by geneID
     gene_df = genes[genes.iloc[:, 3] == geneID].reset_index(drop=True)
     exon_df = exons[exons.iloc[:, 3] == geneID].reset_index(drop=True)
@@ -189,7 +189,7 @@ def process_gene(geneID, geneName, genes, exons, build=None, logger):
     gene_strand = gene_df.iloc[0, 6]
     isoform_names = exon_df["TRANSCRIPT"].unique().tolist()
 
-    logger(isoform_names)
+    logger.info(isoform_names)
 
     gene_info = {
         "geneName": geneName,
