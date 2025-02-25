@@ -170,7 +170,7 @@ def bam_info_to_dict(bam_info, parse=False):
     return qname_dict, qname_cbumi_dict, qname_sample_dict
 
 
-def process_gene(geneID, geneName, genes, exons, build=None):
+def process_gene(geneID, geneName, genes, exons, build=None, logger):
     # Filter genes and exons by geneID
     gene_df = genes[genes.iloc[:, 3] == geneID].reset_index(drop=True)
     exon_df = exons[exons.iloc[:, 3] == geneID].reset_index(drop=True)
@@ -188,6 +188,8 @@ def process_gene(geneID, geneName, genes, exons, build=None):
         gene_chr = f"{build}_{gene_chr}"
     gene_strand = gene_df.iloc[0, 6]
     isoform_names = exon_df["TRANSCRIPT"].unique().tolist()
+
+    logger(isoform_names)
 
     gene_info = {
         "geneName": geneName,
@@ -858,12 +860,12 @@ def extract_annotation_info(
             logger.info("In")
             logger.info(num_cores)
             geneStructureInformation = Parallel(n_jobs=num_cores)(
-                delayed(process_gene)(geneID, geneName, genes, exons, build)
+                delayed(process_gene)(geneID, geneName, genes, exons, build, logger)
                 for geneID, geneName in Genes
             )
             geneStructureInformation = dict(geneStructureInformation)
             geneStructureInformation = add_build(geneStructureInformation, build)
-            print("finish generating geneStructureInformation.pkl")
+            logger.info("finish generating geneStructureInformation.pkl")
             # save to output, single gene
             if output is not None:
                 with open(output, "wb") as file:
@@ -914,7 +916,7 @@ def extract_annotation_info(
                     with open(output[:-4] + "updated.pkl", "wb") as file:
                         pickle.dump(geneStructureInformation, file)
     #########group genes into meta-genes########
-    if os.path.isfile(meta_output) == False:
+    if not os.path.isfile(meta_output):
         logger.info("meta gene information does not exist, will generate.")
         if genes is None:  # bam generated reference
             geneIDs = list(geneStructureInformation.keys())
