@@ -859,10 +859,17 @@ def extract_annotation_info(
         if not os.path.isfile(output):
             logger.info("In")
             logger.info(num_cores)
-            geneStructureInformation = Parallel(n_jobs=num_cores)(
-                delayed(process_gene)(geneID, geneName, genes, exons, build, logger)
-                for geneID, geneName in Genes
-            )
+
+            geneStructureInformation = []
+            for geneID, geneName in Genes:
+                geneStructureInformation.append(
+                    process_gene(geneID, geneName, genes, exons, build, logger)
+                )
+
+            # geneStructureInformation = Parallel(n_jobs=num_cores)(
+            #     delayed(process_gene)(geneID, geneName, genes, exons, build, logger)
+            #     for geneID, geneName in Genes
+            # )
             geneStructureInformation = dict(geneStructureInformation)
             geneStructureInformation = add_build(geneStructureInformation, build)
             logger.info("finish generating geneStructureInformation.pkl")
