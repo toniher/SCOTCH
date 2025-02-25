@@ -29,6 +29,7 @@ parser.add_argument('--z_score_threshold',type=int, default=10, help="threshold 
 parser.add_argument('--min_gene_size',type=int, default=50, help="minimal length of novel discovered gene")
 parser.add_argument('--barcode_cell',type=str, help="cell barcode tag in bam file")
 parser.add_argument('--barcode_umi',type=str,  help="umi barcode tag in bam file")
+parser.add_argument('--no_bam_annotation', action='store_true', help="Only create annotation reference files. No BAM annotation.")
 
 #task is compatible matrix
 parser.add_argument('--job_index',type=int, default=0, help="work array index")
@@ -132,9 +133,12 @@ def main():
         # generate gene annotation
         logger.info('Start generating gene annotation.')
         annotator.annotate_genes()
+
         # bam information
-        logger.info('Start processing bam file information.')
-        #annotator.annotation_bam(args.barcode_cell, args.barcode_umi)
+        if not args.no_bam_annotation:
+            logger.info('Start processing bam file information.')
+            annotator.annotation_bam(args.barcode_cell, args.barcode_umi)
+
         copy_log_to_targets(log_file, args.target)
     def run_compatible():
         logger, log_file = setup_logger(args.target[0], 'compatible')
