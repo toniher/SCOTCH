@@ -86,23 +86,17 @@ def extract_bam_info_parse(bam):
     if match:
         sublib = match.group(1)
     else:
-        sublib = "1"
-    # qname cb umi cbumi length
-    ReadTags = [
-        (
-            read.qname,
-            read.qname.split("_")[-5]
-            + "_"
-            + read.qname.split("_")[-4]
-            + "_"
-            + read.qname.split("_")[-3],
-            read.qname.split("_")[-1],
-            len(read.query_alignment_sequence),
-            read.get_tag("pS"),
-            sublib,
-        )
-        for read in bamFilePysam
-    ]
+        sublib = '1'
+    #qname cb umi cbumi length
+    try:
+        ReadTags = [(read.qname, read.qname.split('_')[-5]+'_'+read.qname.split('_')[-4]+'_'+read.qname.split('_')[-3],
+                    read.qname.split('_')[-1] , len(read.query_alignment_sequence),
+                    read.get_tag('pS'), sublib) for read in bamFilePysam]
+    except:
+        ReadTags = [(read.qname, read.qname.split('_')[-5]+'_'+read.qname.split('_')[-4]+'_'+read.qname.split('_')[-3],
+                    read.qname.split('_')[-1] , len(read.query_alignment_sequence),
+                    'sample', sublib) for read in bamFilePysam]
+        
     ReadTagsDF = pd.DataFrame(ReadTags)
     if ReadTagsDF.shape[0] > 0:
         ReadTagsDF.columns = ["QNAME", "CB", "UMI", "LENGTH", "SAMPLE", "SUBLIB"]
