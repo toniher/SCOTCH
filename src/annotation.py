@@ -1,53 +1,88 @@
 #!/usr/bin/env python
 
-from collections import defaultdict
-import pysam
-from joblib import Parallel, delayed
-import reference as ref
 import os
-import pandas as pd
-import re
 import pickle
+import re
+import shutil
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import numpy as np
+import pandas as pd
+import pysam
+import reference as ref
+from joblib import Parallel, delayed
 from preprocessing import load_pickle, merge_exons
 from scipy.ndimage import gaussian_filter1d
-import numpy as np
-import shutil
-
 
 ######################################################################
 ##############################annotation##############################
 ######################################################################
 
-def extract_bam_info_folder(bam_folder, num_cores, parse=False, pacbio = False,barcode_cell = None, barcode_umi = None):
+
+def extract_bam_info_folder(
+    bam_folder,
+    num_cores,
+    parse=False,
+    pacbio=False,
+    barcode_cell=None,
+    barcode_umi=None,
+    logger=None,
+):
     files = os.listdir(bam_folder)
-    bamfiles = [os.path.join(bam_folder,f) for f in files if f.endswith('.bam')]
+    logger.info("STARTING EXTRACTION OF BAM INFO FOLDER")
+    bamfiles = [os.path.join(bam_folder, f) for f in files if f.endswith(".bam")]
     if parse:
-        bamfiles = [bam for bam in bamfiles if bam+'.bai' in files]
-        df = Parallel(n_jobs=num_cores)(delayed(extract_bam_info_parse)(bam) for bam in bamfiles)
+        bamfiles = [bam for bam in bamfiles if bam + ".bai" in files]
+        df = Parallel(n_jobs=num_cores)(
+            delayed(extract_bam_info_parse)(bam) for bam in bamfiles
+        )
     elif pacbio:
-        df = Parallel(n_jobs=num_cores)(delayed(extract_bam_info_pacbio)(bam,barcode_cell, barcode_umi) for bam in bamfiles)
+        df = Parallel(n_jobs=num_cores)(
+            delayed(extract_bam_info_pacbio)(bam, barcode_cell, barcode_umi)
+            for bam in bamfiles
+        )
     else:
-        df = Parallel(n_jobs=num_cores)(delayed(extract_bam_info)(bam,barcode_cell, barcode_umi) for bam in bamfiles)
+        df = Parallel(n_jobs=num_cores)(
+            delayed(extract_bam_info)(bam, barcode_cell, barcode_umi)
+            for bam in bamfiles
+        )
     ReadTagsDF = pd.concat(df).reset_index(drop=True)
     return ReadTagsDF
 
-def extract_bam_info(bam, barcode_cell = 'CB', barcode_umi = 'UB'):
-    #extract readname, cb, umi from bam file
+
+def extract_bam_info(bam, barcode_cell="CB", barcode_umi="UB"):
+    print("BAM INFO STEP")
+    # extract readname, cb, umi from bam file
     # bam: path to bam file
     bamFilePysam = pysam.Samfile(bam, "rb")
-    ReadTags = [(read.qname, read.get_tag(barcode_cell), read.get_tag(barcode_umi), read.qend-read.qstart) for read in bamFilePysam]
+    ReadTags = [
+        (
+            read.qname,
+            read.get_tag(barcode_cell),
+            read.get_tag(barcode_umi),
+            read.qend - read.qstart,
+        )
+        for read in bamFilePysam
+    ]
     ReadTagsDF = pd.DataFrame(ReadTags)
-    if ReadTagsDF.shape[0]>0:
-        ReadTagsDF.columns = ['QNAME', 'CB', 'UMI', 'LENGTH']
-        ReadTagsDF = ReadTagsDF.sort_values(by=['CB','UMI','LENGTH'],ascending=[True, True, False]).reset_index(drop=True)
-        ReadTagsDF['CBUMI']=ReadTagsDF.CB.astype(str)+'_'+ReadTagsDF.UMI.astype(str)
+    if ReadTagsDF.shape[0] > 0:
+        ReadTagsDF.columns = ["QNAME", "CB", "UMI", "LENGTH"]
+        ReadTagsDF = ReadTagsDF.sort_values(
+            by=["CB", "UMI", "LENGTH"], ascending=[True, True, False]
+        ).reset_index(drop=True)
+        ReadTagsDF["CBUMI"] = (
+            ReadTagsDF.CB.astype(str) + "_" + ReadTagsDF.UMI.astype(str)
+        )
     else:
         ReadTagsDF = None
     return ReadTagsDF
 
+
 def extract_bam_info_parse(bam):
+    print("BAM INFO STEP - PARSE")
     bamFilePysam = pysam.Samfile(bam, "rb")
-    match = re.search(r'sublibrary(\d+)', bam)
+    match = re.search(r"sublibrary(\d+)", bam)
     if match:
         sublib = match.group(1)
     else:
@@ -61,67 +96,125 @@ def extract_bam_info_parse(bam):
         ReadTags = [(read.qname, read.qname.split('_')[-5]+'_'+read.qname.split('_')[-4]+'_'+read.qname.split('_')[-3],
                     read.qname.split('_')[-1] , len(read.query_alignment_sequence),
                     'sample', sublib) for read in bamFilePysam]
+        
     ReadTagsDF = pd.DataFrame(ReadTags)
     if ReadTagsDF.shape[0] > 0:
-        ReadTagsDF.columns = ['QNAME', 'CB', 'UMI', 'LENGTH','SAMPLE', 'SUBLIB']
-        ReadTagsDF = ReadTagsDF.sort_values(by=['SAMPLE','CB', 'UMI', 'LENGTH'], ascending=[True, True, True, False]).reset_index(drop=True)
-        ReadTagsDF['CBUMI'] = ReadTagsDF.CB.astype(str) + '_' + ReadTagsDF.UMI.astype(str) + '_' + ReadTagsDF.SUBLIB.astype(str)
+        ReadTagsDF.columns = ["QNAME", "CB", "UMI", "LENGTH", "SAMPLE", "SUBLIB"]
+        ReadTagsDF = ReadTagsDF.sort_values(
+            by=["SAMPLE", "CB", "UMI", "LENGTH"], ascending=[True, True, True, False]
+        ).reset_index(drop=True)
+        ReadTagsDF["CBUMI"] = (
+            ReadTagsDF.CB.astype(str)
+            + "_"
+            + ReadTagsDF.UMI.astype(str)
+            + "_"
+            + ReadTagsDF.SUBLIB.astype(str)
+        )
     else:
         ReadTagsDF = None
     return ReadTagsDF
 
-def extract_bam_info_pacbio(bam, barcode_cell = 'XC', barcode_umi = 'XM'):
+
+def extract_bam_info_pacbio(bam, barcode_cell="XC", barcode_umi="XM"):
+    print("BAM INFO STEP - PACBIO")
     bamFilePysam = pysam.Samfile(bam, "rb")
-    #qname cb umi cbumi length
-    ReadTags = [(read.qname, read.get_tag(barcode_cell), read.get_tag(barcode_umi), read.reference_length) for read in bamFilePysam]
+    # qname cb umi cbumi length
+    ReadTags = [
+        (
+            read.qname,
+            read.get_tag(barcode_cell),
+            read.get_tag(barcode_umi),
+            read.reference_length,
+        )
+        for read in bamFilePysam
+    ]
     ReadTagsDF = pd.DataFrame(ReadTags)
     if ReadTagsDF.shape[0] > 0:
-        ReadTagsDF.columns = ['QNAME', 'CB', 'UMI', 'LENGTH']
+        ReadTagsDF.columns = ["QNAME", "CB", "UMI", "LENGTH"]
         ReadTagsDF.dropna(inplace=True)
-        ReadTagsDF = ReadTagsDF.sort_values(by=['CB','UMI','LENGTH'],ascending=[True, True, False]).reset_index(drop=True)
-        ReadTagsDF['CBUMI'] = ReadTagsDF.CB.astype(str) + '_' + ReadTagsDF.UMI.astype(str)
-        ReadTagsDF['QNAME'] = ReadTagsDF.QNAME.astype(str) + '_' + ReadTagsDF.LENGTH.astype(int).astype(str)
+        ReadTagsDF = ReadTagsDF.sort_values(
+            by=["CB", "UMI", "LENGTH"], ascending=[True, True, False]
+        ).reset_index(drop=True)
+        ReadTagsDF["CBUMI"] = (
+            ReadTagsDF.CB.astype(str) + "_" + ReadTagsDF.UMI.astype(str)
+        )
+        ReadTagsDF["QNAME"] = (
+            ReadTagsDF.QNAME.astype(str)
+            + "_"
+            + ReadTagsDF.LENGTH.astype(int).astype(str)
+        )
     else:
         ReadTagsDF = None
     return ReadTagsDF
+
 
 def bam_info_to_dict(bam_info, parse=False):
-    #input bam_info is a dataframe(bam_info is sorted already when generating)
-    #the output dict qname_dict: key: qname, value: the right qname to keep; qname_CBUMI_dict: qname_cbumi
-    #generate qname_dict
-    max_length_df = bam_info.drop_duplicates(subset='CBUMI', keep='first')
-    cbumi_to_max_qname = pd.Series(max_length_df.QNAME.values, index=max_length_df.CBUMI).to_dict()
-    qname_dict = {row['QNAME']: cbumi_to_max_qname[row['CBUMI']] for index, row in bam_info.iterrows()}
-    #generate qname_cbumi_dict
+    # input bam_info is a dataframe(bam_info is sorted already when generating)
+    # the output dict qname_dict: key: qname, value: the right qname to keep; qname_CBUMI_dict: qname_cbumi
+    # generate qname_dict
+    max_length_df = bam_info.drop_duplicates(subset="CBUMI", keep="first")
+    cbumi_to_max_qname = pd.Series(
+        max_length_df.QNAME.values, index=max_length_df.CBUMI
+    ).to_dict()
+    qname_dict = {
+        row["QNAME"]: cbumi_to_max_qname[row["CBUMI"]]
+        for index, row in bam_info.iterrows()
+    }
+    # generate qname_cbumi_dict
     # Assuming 'bam_info' is your pandas DataFrame
-    qname_cbumi_dict = dict(zip(bam_info['QNAME'], bam_info['CBUMI']))
+    qname_cbumi_dict = dict(zip(bam_info["QNAME"], bam_info["CBUMI"]))
     qname_sample_dict = None
     if parse:
-        qname_sample_dict = dict(zip(bam_info['QNAME'], bam_info['SAMPLE']))
+        qname_sample_dict = dict(zip(bam_info["QNAME"], bam_info["SAMPLE"]))
     return qname_dict, qname_cbumi_dict, qname_sample_dict
 
-def process_gene(geneID, geneName, genes ,exons, build=None):
-    GeneDf = genes[genes.iloc[:, 3] == geneID].reset_index(drop=True)
-    ExonsDf = exons[exons.iloc[:, 3] == geneID].reset_index(drop=True)
-    exonsdf = ExonsDf.iloc[:, :3].drop_duplicates().reset_index(drop=True)
-    exonsdf['exon_num'] = list(range(exonsdf.shape[0]))
-    geneChr, geneStart, geneEnd = GeneDf.iloc[0, 0], GeneDf.iloc[0, 1], GeneDf.iloc[0, 2]
-    if build is not None:
-        geneChr = str(build) + '_'+str(geneChr)
-    geneStrand = GeneDf.iloc[0, 6]
-    isoformNames = ExonsDf.TRANSCRIPT.unique().tolist()
-    GeneInfo = {'geneName': geneName, 'geneID': geneID, 'geneChr': geneChr, 'geneStart': geneStart, 'geneEnd': geneEnd,
-                'geneStrand':geneStrand, 'numofExons': exonsdf.shape[0], 'numofIsoforms': len(isoformNames),
-                'isoformNames': isoformNames}
-    ExonPositions = list(zip(exonsdf.iloc[:, 1], exonsdf.iloc[:, 2]))
-    ExonsDf = ExonsDf.merge(exonsdf, how='left')
-    ExonIsoformDict = dict()
-    for isoform in isoformNames:
-        ExonIsoformDict[isoform] = ExonsDf[ExonsDf.TRANSCRIPT == isoform].exon_num.tolist()
-    return geneID, [GeneInfo, ExonPositions, ExonIsoformDict]
+
+def process_gene(geneID, geneName, genes, exons, build=None, logger=None):
+    # Filter genes and exons by geneID
+    gene_df = genes[genes.iloc[:, 3] == geneID].reset_index(drop=True)
+    exon_df = exons[exons.iloc[:, 3] == geneID].reset_index(drop=True)
+
+    if gene_df.empty or exon_df.empty:
+        raise ValueError(f"GeneID {geneID} not found in genes or exons DataFrame.")
+
+    # Process exons
+    unique_exons = exon_df.iloc[:, :3].drop_duplicates().reset_index(drop=True)
+    unique_exons["exon_num"] = range(unique_exons.shape[0])
+
+    # Extract gene information
+    gene_chr, gene_start, gene_end = gene_df.iloc[0, [0, 1, 2]]
+    if build:
+        gene_chr = f"{build}_{gene_chr}"
+    gene_strand = gene_df.iloc[0, 6]
+    isoform_names = exon_df["TRANSCRIPT"].unique().tolist()
+
+    logger.info(isoform_names)
+
+    gene_info = {
+        "geneName": geneName,
+        "geneID": geneID,
+        "geneChr": gene_chr,
+        "geneStart": gene_start,
+        "geneEnd": gene_end,
+        "geneStrand": gene_strand,
+        "numofExons": unique_exons.shape[0],
+        "numofIsoforms": len(isoform_names),
+        "isoformNames": isoform_names,
+    }
+
+    exon_positions = list(zip(unique_exons.iloc[:, 1], unique_exons.iloc[:, 2]))
+    exon_df = exon_df.merge(unique_exons, how="left")
+
+    exon_isoform_dict = {
+        isoform: exon_df[exon_df["TRANSCRIPT"] == isoform]["exon_num"].tolist()
+        for isoform in isoform_names
+    }
+
+    return geneID, [gene_info, exon_positions, exon_isoform_dict]
 
 
 ######################################################################
+
 
 def get_continuous_blocks(data):
     blocks = []
@@ -147,6 +240,7 @@ def get_continuous_blocks(data):
     blocks.append((current_start, current_end))
     return blocks
 
+
 def count_and_sort_tuple_elements(tuple_list):
     freq_dict = defaultdict(int)
     for a, b in tuple_list:
@@ -158,7 +252,9 @@ def count_and_sort_tuple_elements(tuple_list):
 
 def merge_boundaries_by_evidence(boundaries, merge_distance=10):
     # Sort boundaries by value (evidence) in descending order
-    sorted_boundaries = sorted(boundaries.items(), key=lambda item: item[1], reverse=True)
+    sorted_boundaries = sorted(
+        boundaries.items(), key=lambda item: item[1], reverse=True
+    )
     merged_boundaries = {}
     while sorted_boundaries:
         # Take the boundary with the highest evidence
@@ -178,7 +274,6 @@ def merge_boundaries_by_evidence(boundaries, merge_distance=10):
     return merged_boundaries
 
 
-
 def get_splicejuction_from_annotation(exonInfo, isoformInfo):
     isoform_names = list(isoformInfo.keys())
     sjInfo = {}
@@ -187,7 +282,7 @@ def get_splicejuction_from_annotation(exonInfo, isoformInfo):
         exons = [exonInfo[ind] for ind in exon_indexs]
         exons = merge_exons(exons)
         splice_junctions = []
-        if len(exons)>1:
+        if len(exons) > 1:
             a, b = exons[0]
             for s, e in exons[1:]:
                 splice_junctions.append((b, s))
@@ -206,11 +301,14 @@ def get_splicejuction_from_read(read):
             junctions.append((junction_start, junction_end))
         if cigartype in (0, 2, 3):
             ref_pos += cigarlen
-    return junctions #this returns introns e.g. (103, 105) is 0 based containing 2 bases
+    return (
+        junctions  # this returns introns e.g. (103, 105) is 0 based containing 2 bases
+    )
 
-def cut_exons_by_derivative(exons, coverage, sigma = 1, z_score_threshold = 3):
-    #exon_dict: just one exon
-    #coverage: the whole coverage object {1000:100, 1001:101}
+
+def cut_exons_by_derivative(exons, coverage, sigma=1, z_score_threshold=3):
+    # exon_dict: just one exon
+    # coverage: the whole coverage object {1000:100, 1001:101}
     derivatives, positions = [], []
     for exon in exons:
         exon_start, exon_end = exon
@@ -226,34 +324,44 @@ def cut_exons_by_derivative(exons, coverage, sigma = 1, z_score_threshold = 3):
     positions = np.asarray(positions)
     mean_derivative = np.mean(derivatives)
     std_derivative = np.std(derivatives)
-    if std_derivative==0:
+    if std_derivative == 0:
         cut_positions = []
     else:
         z_scores = (derivatives - mean_derivative) / std_derivative
         cut_positions = positions[np.abs(z_scores) > z_score_threshold]
-    if len(cut_positions)==0:
+    if len(cut_positions) == 0:
         return exons
     cut_positions_valid = [cut_positions[0]]
-    if len(cut_positions)>1:
+    if len(cut_positions) > 1:
         for i in range(1, len(cut_positions)):
             if cut_positions[i] - cut_positions[i - 1] > 10:
                 cut_positions_valid.append(cut_positions[i])
     new_exons = []
     for exon in exons:
         exon_start, exon_end = exon
-        cuts = [pos for pos in cut_positions_valid if pos - exon_start > 10 and exon_end-pos > 10]
-        if len(cuts)==0:
+        cuts = [
+            pos
+            for pos in cut_positions_valid
+            if pos - exon_start > 10 and exon_end - pos > 10
+        ]
+        if len(cuts) == 0:
             new_exons.append(exon)
         else:
-            exon_positions = [exon_start]+cuts +[exon_end]
-            for i in range(len(exon_positions)-1):
-                new_exons.append((exon_positions[i], exon_positions[i+1]))
+            exon_positions = [exon_start] + cuts + [exon_end]
+            for i in range(len(exon_positions) - 1):
+                new_exons.append((exon_positions[i], exon_positions[i + 1]))
     return new_exons
 
 
-def get_non_overlapping_exons(bam_file, chrom, gene_start, gene_end,
-                              coverage_threshold=0.02, boundary_threshold=0.02,
-                              z_score_threshold = 10):
+def get_non_overlapping_exons(
+    bam_file,
+    chrom,
+    gene_start,
+    gene_end,
+    coverage_threshold=0.02,
+    boundary_threshold=0.02,
+    z_score_threshold=10,
+):
     """
     get non overlapping exons based on bam files given a gene region
     :param bam_file: a single bam file path/oject or a list of multiple bam file paths/objects that will be used for concensus result
@@ -265,22 +373,22 @@ def get_non_overlapping_exons(bam_file, chrom, gene_start, gene_end,
     :param z_score_threshold: threshold to filter out within exon partitions based on sharp changes of derivatives
     :return: a list of tuples representing coordinates of exons
     """
-    if isinstance(bam_file,str):
+    if isinstance(bam_file, str):
         # a single path
         bams = [pysam.AlignmentFile(bam_file, "rb")]
-    elif isinstance(bam_file,list):
+    elif isinstance(bam_file, list):
         # a list of path
-        if isinstance(bam_file[0],str):
+        if isinstance(bam_file[0], str):
             bams = [pysam.AlignmentFile(bam_, "rb") for bam_ in bam_file]
         else:
             # a list of objects
             bams = bam_file
     else:
         # a single object
-        bams = [bam_file] #a pysam object
-    #--> bams is a list of pysam objects
+        bams = [bam_file]  # a pysam object
+    # --> bams is a list of pysam objects
     exons, coverage, junctions = [], {}, []
-    #get read coverage
+    # get read coverage
     for bam in bams:
         for read in bam.fetch(chrom, gene_start, gene_end):
             if read.reference_start >= gene_start and read.reference_end < gene_end:
@@ -291,17 +399,21 @@ def get_non_overlapping_exons(bam_file, chrom, gene_start, gene_end,
                             coverage[pos] += 1
                         else:
                             coverage[pos] = 1
-    if len(coverage)==0:
+    if len(coverage) == 0:
         return exons
-    coverage_threshold_absolute = max(max(coverage.values())*coverage_threshold,20)
-    #only keep positions that meet the coverage threshold
-    coverage = {pos: cov for pos, cov in coverage.items() if cov > coverage_threshold_absolute}
+    coverage_threshold_absolute = max(max(coverage.values()) * coverage_threshold, 20)
+    # only keep positions that meet the coverage threshold
+    coverage = {
+        pos: cov for pos, cov in coverage.items() if cov > coverage_threshold_absolute
+    }
     coverage_blocks = get_continuous_blocks(coverage)
-    coverage_blocks = [(a,b) for a, b in coverage_blocks if b-a >= 20]#delete less than 20bp exons
-    if len(coverage_blocks)==0:
+    coverage_blocks = [
+        (a, b) for a, b in coverage_blocks if b - a >= 20
+    ]  # delete less than 20bp exons
+    if len(coverage_blocks) == 0:
         return exons
     # fill up holes less than 20bp
-    if len(coverage_blocks) >1:
+    if len(coverage_blocks) > 1:
         coverage_blocks_ = []
         current_start, current_end = coverage_blocks[0]
         for start, end in coverage_blocks[1:]:
@@ -312,14 +424,16 @@ def get_non_overlapping_exons(bam_file, chrom, gene_start, gene_end,
                 current_end = end
         coverage_blocks_.append((current_start, current_end))
         coverage_blocks = coverage_blocks_
-    #update exons to meta-exons
+    # update exons to meta-exons
     exons = coverage_blocks
-    #partition1: use splicing junctions to find sub-exons
+    # partition1: use splicing junctions to find sub-exons
     boundaries = count_and_sort_tuple_elements(junctions)
-    #filter out splicing positions with few support
-    if len(boundaries)>1:
-        boundary_threshold_absolute = max(max(list(boundaries.values())) * boundary_threshold, 20)
-        #group boundaries by meta-exons
+    # filter out splicing positions with few support
+    if len(boundaries) > 1:
+        boundary_threshold_absolute = max(
+            max(list(boundaries.values())) * boundary_threshold, 20
+        )
+        # group boundaries by meta-exons
         filtered_boundaries = [{} for _ in coverage_blocks]
         for boundary, freq in boundaries.items():
             if freq >= boundary_threshold_absolute:
@@ -327,35 +441,42 @@ def get_non_overlapping_exons(bam_file, chrom, gene_start, gene_end,
                     if start < boundary < end:
                         filtered_boundaries[i][boundary] = freq
                         break
-        Filtered_Boundaries= []
+        Filtered_Boundaries = []
         for filtered_boundaries_ in filtered_boundaries:
-            merged_boundaries = merge_boundaries_by_evidence(filtered_boundaries_, merge_distance=10)
+            merged_boundaries = merge_boundaries_by_evidence(
+                filtered_boundaries_, merge_distance=10
+            )
             sorted_boundaries = dict(sorted(merged_boundaries.items()))
             Filtered_Boundaries.append(sorted_boundaries)
-        #futher filter the boundaries that are too close to a boundary of an exon_block
+        # futher filter the boundaries that are too close to a boundary of an exon_block
         for i, block_boundaries in enumerate(Filtered_Boundaries):
             for boundary in list(block_boundaries.keys()):
-                if abs(boundary - coverage_blocks[i][0])<=10 or abs(boundary - coverage_blocks[i][1])<=10:
+                if (
+                    abs(boundary - coverage_blocks[i][0]) <= 10
+                    or abs(boundary - coverage_blocks[i][1]) <= 10
+                ):
                     del Filtered_Boundaries[i][boundary]
-        #partition exon blocks into sub exons based on splicing positions
-        exons = [] #----re-initiate exons
+        # partition exon blocks into sub exons based on splicing positions
+        exons = []  # ----re-initiate exons
         for i in range(len(coverage_blocks)):
             start, end = coverage_blocks[i]
-            positions = [start]+list(Filtered_Boundaries[i].keys())+[end]
-            for ii in range(len(positions)-1):
-                exons.append((positions[ii], positions[ii+1]))
-    #partition2: partition meta-exons using read coverage derivatives
-    exons = cut_exons_by_derivative(exons, coverage, sigma=1, z_score_threshold=z_score_threshold)
+            positions = [start] + list(Filtered_Boundaries[i].keys()) + [end]
+            for ii in range(len(positions) - 1):
+                exons.append((positions[ii], positions[ii + 1]))
+    # partition2: partition meta-exons using read coverage derivatives
+    exons = cut_exons_by_derivative(
+        exons, coverage, sigma=1, z_score_threshold=z_score_threshold
+    )
     return exons
 
 
-def get_genes_from_bam(input_bam_path, coverage_threshold = 5, min_region_size=50):
+def get_genes_from_bam(input_bam_path, coverage_threshold=5, min_region_size=50):
     def process_bam_file(bam_file, coverage_threshold, min_region_size):
-        #bam_file: a single path or a list of paths for consensus results
+        # bam_file: a single path or a list of paths for consensus results
         if isinstance(bam_file, str):
             bams = pysam.AlignmentFile(bam_file, "rb")
-        else: #list
-            bams = [ pysam.AlignmentFile(bam, "rb") for bam in bam_file]
+        else:  # list
+            bams = [pysam.AlignmentFile(bam, "rb") for bam in bam_file]
         coverage = defaultdict(lambda: defaultdict(int))
         chromosomes = list(set([bam.references for bam in bams]))
         for chrom in chromosomes:
@@ -367,19 +488,32 @@ def get_genes_from_bam(input_bam_path, coverage_threshold = 5, min_region_size=5
                                 coverage[chrom][pos] += 1
         genes = {}
         for chrom, cov_dict in coverage.items():
-            cov_dict = {pos: cov for pos, cov in cov_dict.items() if cov > coverage_threshold}
+            cov_dict = {
+                pos: cov for pos, cov in cov_dict.items() if cov > coverage_threshold
+            }
             coverage_blocks = get_continuous_blocks(cov_dict)
-            genes[chrom] = [(a, b) for a, b in coverage_blocks if b - a > min_region_size]
+            genes[chrom] = [
+                (a, b) for a, b in coverage_blocks if b - a > min_region_size
+            ]
         return genes
+
     if isinstance(input_bam_path, list):
-        if os.path.isdir(input_bam_path[0]): # a list of folders
-            bam_files = [os.path.join(folder, file) for folder in input_bam_path for file in folder]
-            #bam_files = [os.path.join(input_bam_path, f) for f in os.listdir(input_bam_path) if f.endswith('.bam')]
-        else: # a list of paths
+        if os.path.isdir(input_bam_path[0]):  # a list of folders
+            bam_files = [
+                os.path.join(folder, file)
+                for folder in input_bam_path
+                for file in folder
+            ]
+            # bam_files = [os.path.join(input_bam_path, f) for f in os.listdir(input_bam_path) if f.endswith('.bam')]
+        else:  # a list of paths
             bam_files = input_bam_path
-    else:#single sample
+    else:  # single sample
         if os.path.isdir(input_bam_path):
-            bam_files = [os.path.join(input_bam_path, f) for f in os.listdir(input_bam_path) if f.endswith('.bam')]
+            bam_files = [
+                os.path.join(input_bam_path, f)
+                for f in os.listdir(input_bam_path)
+                if f.endswith(".bam")
+            ]
         else:
             bam_files = [input_bam_path]
     all_genes = process_bam_file(bam_files, coverage_threshold, min_region_size)
@@ -389,19 +523,19 @@ def get_genes_from_bam(input_bam_path, coverage_threshold = 5, min_region_size=5
     return sorted_all_genes
 
 
-
-def update_exons(A, B, distance_threshold = 20):
+def update_exons(A, B, distance_threshold=20):
     ##B is reference
     ##A is based on bam
-    def correct_point(point, reference_points, threshold = distance_threshold):
+    def correct_point(point, reference_points, threshold=distance_threshold):
         closest_point = None
-        min_distance = float('inf')
+        min_distance = float("inf")
         for ref_point in reference_points:
             distance = abs(point - ref_point)
             if distance < threshold and distance < min_distance:
                 closest_point = ref_point
                 min_distance = distance
         return closest_point if closest_point is not None else point
+
     def partition_intervals(A, B):
         all_intervals = A + B
         all_intervals.sort()
@@ -416,15 +550,16 @@ def update_exons(A, B, distance_threshold = 20):
                 temp = [current_start, current_end, start, end]
                 temp.sort()
                 for i in [0, 1]:
-                    if temp[i]<temp[i + 1]:
+                    if temp[i] < temp[i + 1]:
                         partitions.append((temp[i], temp[i + 1]))
                 current_start, current_end = temp[2], temp[3]
-        if current_start<current_end:
+        if current_start < current_end:
             partitions.append((current_start, current_end))
         return partitions
-    if len(A)==0:
+
+    if len(A) == 0:
         return B
-    if len(B)==1:
+    if len(B) == 1:
         return B
     reference_points = [point for segment in B for point in segment]
     corrected_A = []
@@ -432,16 +567,21 @@ def update_exons(A, B, distance_threshold = 20):
         corrected_start = correct_point(start, reference_points)
         corrected_end = correct_point(end, reference_points)
         corrected_A.append((corrected_start, corrected_end))
-    corrected_A = [(a,b) for a,b in corrected_A if a<b]
-    return partition_intervals(corrected_A,B)
+    corrected_A = [(a, b) for a, b in corrected_A if a < b]
+    return partition_intervals(corrected_A, B)
 
 
-
-
-#modes involving bam file
-def annotate_genes(geneStructureInformation, bamfile_path,
-                   coverage_threshold_gene=20, coverage_threshold_exon=0.02,coverage_threshold_splicing=0.02,z_score_threshold = 10,
-                   min_gene_size=50, workers=1):
+# modes involving bam file
+def annotate_genes(
+    geneStructureInformation,
+    bamfile_path,
+    coverage_threshold_gene=20,
+    coverage_threshold_exon=0.02,
+    coverage_threshold_splicing=0.02,
+    z_score_threshold=10,
+    min_gene_size=50,
+    workers=1,
+):
     """
     generate geneStructureInformation either using bamfile alone (leave geneStructureInformation blank) or update existing annotation file using bam file
     :param geneStructureInformation: pickle file object of existing gene annotation, not path
@@ -453,42 +593,79 @@ def annotate_genes(geneStructureInformation, bamfile_path,
     :param min_gene_size: minimal length for novel gene discovery
     :return: updated geneStructureInformation annotation
     """
-    def novel_gene_annotation(chrom, all_genes_dict, bamfile, coverage_threshold_exon=0.01, coverage_threshold_splicing=0.01,z_score_threshold = 10):
-        #all_genes: {'chr1':[(100,200),(300,400)]}, bamfile: path to one bam file
+
+    def novel_gene_annotation(
+        chrom,
+        all_genes_dict,
+        bamfile,
+        coverage_threshold_exon=0.01,
+        coverage_threshold_splicing=0.01,
+        z_score_threshold=10,
+    ):
+        # all_genes: {'chr1':[(100,200),(300,400)]}, bamfile: path to one bam file
         bamfiles = None
-        #----from one sample
+        # ----from one sample
         if isinstance(bamfile, str):
             if os.path.isfile(bamfile) == False:  # bamfile is a folder path
-                bamFile_name = [f for f in os.listdir(bamfile) if
-                                f.endswith('.bam') and '.' + str(chrom) + '.' in f]
-                bamfiles = [pysam.AlignmentFile(os.path.join(bamfile, bamFile_name[0]))]# bamfile is a file path now
+                bamFile_name = [
+                    f
+                    for f in os.listdir(bamfile)
+                    if f.endswith(".bam") and "." + str(chrom) + "." in f
+                ]
+                bamfiles = [
+                    pysam.AlignmentFile(os.path.join(bamfile, bamFile_name[0]))
+                ]  # bamfile is a file path now
             else:
-                bamfiles = [pysam.AlignmentFile(bamfile, "rb")] # bamfile is a file path
-        #-----from multiple samples
+                bamfiles = [
+                    pysam.AlignmentFile(bamfile, "rb")
+                ]  # bamfile is a file path
+        # -----from multiple samples
         elif isinstance(bamfile, list):
-            if os.path.isfile(bamfile[0]) == False:  # bamfile = [folderpath1, folderpath2, ...]
-                bamFile_name = [] #bamFile_name = [folderpath1/bamname1, folderpath2/bamname2, ...]
+            if (
+                os.path.isfile(bamfile[0]) == False
+            ):  # bamfile = [folderpath1, folderpath2, ...]
+                bamFile_name = []  # bamFile_name = [folderpath1/bamname1, folderpath2/bamname2, ...]
                 for folder in bamfile:
                     for file in os.listdir(folder):
-                        if file.endswith('.bam') and '.' + str(chrom) + '.' in file:
-                            bamFile_name.append(os.path.join(folder,file))
+                        if file.endswith(".bam") and "." + str(chrom) + "." in file:
+                            bamFile_name.append(os.path.join(folder, file))
                 bamfiles = [pysam.AlignmentFile(bfn, "rb") for bfn in bamFile_name]
             else:
                 bamfiles = [pysam.AlignmentFile(bfn, "rb") for bfn in bamfile]
         else:
-            print('bamfile must be a list or str')
-        #bamfiles is a list of pysam ojects
+            print("bamfile must be a list or str")
+        # bamfiles is a list of pysam ojects
         genes = all_genes_dict[chrom]  # [(100,200),(300,400)]
         gene_annotations = {}
         for i, (gene_start, gene_end) in enumerate(genes):
-            exonInfo = get_non_overlapping_exons(bamfiles, chrom, gene_start, gene_end, coverage_threshold_exon, coverage_threshold_splicing,
-                                                 z_score_threshold)
-            geneInfo = {'geneName': 'gene_'+ str(i+1)+'_'+chrom, 'geneID': 'gene_'+ str(i+1)+'_'+chrom,
-                        'geneChr': chrom, 'geneStart':gene_start, 'geneEnd':gene_end, 'geneStrand': '.',
-                        'numofExons': len(exonInfo), 'numofIsoforms': 0, 'isoformNames':[]}
+            exonInfo = get_non_overlapping_exons(
+                bamfiles,
+                chrom,
+                gene_start,
+                gene_end,
+                coverage_threshold_exon,
+                coverage_threshold_splicing,
+                z_score_threshold,
+            )
+            geneInfo = {
+                "geneName": "gene_" + str(i + 1) + "_" + chrom,
+                "geneID": "gene_" + str(i + 1) + "_" + chrom,
+                "geneChr": chrom,
+                "geneStart": gene_start,
+                "geneEnd": gene_end,
+                "geneStrand": ".",
+                "numofExons": len(exonInfo),
+                "numofIsoforms": 0,
+                "isoformNames": [],
+            }
             isoformInfo = {}
-            gene_annotations['gene_'+ str(i+1)+'_'+chrom] = [geneInfo, exonInfo, isoformInfo]
+            gene_annotations["gene_" + str(i + 1) + "_" + chrom] = [
+                geneInfo,
+                exonInfo,
+                isoformInfo,
+            ]
         return gene_annotations
+
     def update_isoform_info(original_exons, updated_exons, isoformInfo):
         exon_mapping = {}
         for original_idx, (original_start, original_end) in enumerate(original_exons):
@@ -499,70 +676,133 @@ def annotate_genes(geneStructureInformation, bamfile_path,
                     exon_mapping[original_idx].append(updated_idx)
         updated_isoform_info = {}
         for isoform, exon_indices in isoformInfo.items():
-            updated_indices = [exon_mapping[idx] for idx in exon_indices if idx in exon_mapping]
+            updated_indices = [
+                exon_mapping[idx] for idx in exon_indices if idx in exon_mapping
+            ]
             updated_indices = [ii for i in updated_indices for ii in i]
             updated_isoform_info[isoform] = updated_indices
         return updated_isoform_info
-    def update_annotation(geneStructureInformation, geneID, bamfile_path,coverage_threshold_exon, coverage_threshold_splicing, z_score_threshold):
-        chrom, gene_start, gene_end = geneStructureInformation[geneID][0]['geneChr'], \
-        geneStructureInformation[geneID][0]['geneStart'], geneStructureInformation[geneID][0]['geneEnd']
+
+    def update_annotation(
+        geneStructureInformation,
+        geneID,
+        bamfile_path,
+        coverage_threshold_exon,
+        coverage_threshold_splicing,
+        z_score_threshold,
+    ):
+        chrom, gene_start, gene_end = (
+            geneStructureInformation[geneID][0]["geneChr"],
+            geneStructureInformation[geneID][0]["geneStart"],
+            geneStructureInformation[geneID][0]["geneEnd"],
+        )
         bamfiles = None
         # ----from one sample
         if isinstance(bamfile_path, str):
             if os.path.isfile(bamfile_path) == False:  # bamfile is a folder path
-                bamFile_name = [f for f in os.listdir(bamfile_path) if
-                                f.endswith('.bam') and '.' + str(chrom) + '.' in f]
-                bamfiles = [pysam.AlignmentFile(os.path.join(bamfile_path, bamFile_name[0]))]  # bamfile is a file path now
+                bamFile_name = [
+                    f
+                    for f in os.listdir(bamfile_path)
+                    if f.endswith(".bam") and "." + str(chrom) + "." in f
+                ]
+                bamfiles = [
+                    pysam.AlignmentFile(os.path.join(bamfile_path, bamFile_name[0]))
+                ]  # bamfile is a file path now
             else:
-                bamfiles = [pysam.AlignmentFile(bamfile_path, "rb")]  # bamfile is a file path
+                bamfiles = [
+                    pysam.AlignmentFile(bamfile_path, "rb")
+                ]  # bamfile is a file path
         # -----from multiple samples
         elif isinstance(bamfile_path, list):
-            if os.path.isfile(bamfile_path[0]) == False:  # bamfile = [folderpath1, folderpath2, ...]
+            if (
+                os.path.isfile(bamfile_path[0]) == False
+            ):  # bamfile = [folderpath1, folderpath2, ...]
                 bamFile_name = []  # bamFile_name = [folderpath1/bamname1, folderpath2/bamname2, ...]
                 for folder in bamfile_path:
                     for file in os.listdir(folder):
-                        if file.endswith('.bam') and '.' + str(chrom) + '.' in file:
+                        if file.endswith(".bam") and "." + str(chrom) + "." in file:
                             bamFile_name.append(os.path.join(folder, file))
                 bamfiles = [pysam.AlignmentFile(bfn, "rb") for bfn in bamFile_name]
             else:
                 bamfiles = [pysam.AlignmentFile(bfn, "rb") for bfn in bamfile_path]
         else:
-            print('bamfile must be a list or str')
-        exons_bam = get_non_overlapping_exons(bamfiles, chrom, gene_start, gene_end, coverage_threshold_exon, coverage_threshold_splicing, z_score_threshold)
+            print("bamfile must be a list or str")
+        exons_bam = get_non_overlapping_exons(
+            bamfiles,
+            chrom,
+            gene_start,
+            gene_end,
+            coverage_threshold_exon,
+            coverage_threshold_splicing,
+            z_score_threshold,
+        )
         original_exons = geneStructureInformation[geneID][1]
         updated_exons = update_exons(exons_bam, original_exons)
         geneStructureInformation_copy = geneStructureInformation.copy()
         # geneInfo
         geneInfo = geneStructureInformation_copy[geneID][0]
-        geneInfo['numofExons'] = len(updated_exons)
+        geneInfo["numofExons"] = len(updated_exons)
         # exonInfo
         exonInfo = updated_exons
         # isoformInfo
-        isoformInfo = update_isoform_info(original_exons, updated_exons, geneStructureInformation_copy[geneID][2])
-        return {geneID:[geneInfo, exonInfo, isoformInfo]}
-    #generate gene annotation solely based on bam file
+        isoformInfo = update_isoform_info(
+            original_exons, updated_exons, geneStructureInformation_copy[geneID][2]
+        )
+        return {geneID: [geneInfo, exonInfo, isoformInfo]}
+
+    # generate gene annotation solely based on bam file
     if geneStructureInformation is None:
-        all_genes = get_genes_from_bam(bamfile_path, coverage_threshold_gene, min_gene_size) #{'chr1':[(100,200),(300,400)]}
+        all_genes = get_genes_from_bam(
+            bamfile_path, coverage_threshold_gene, min_gene_size
+        )  # {'chr1':[(100,200),(300,400)]}
         chroms = list(all_genes.keys())
         results = Parallel(n_jobs=workers)(
-            delayed(novel_gene_annotation)(chrom, all_genes, bamfile_path, coverage_threshold_exon, coverage_threshold_splicing, z_score_threshold) for chrom in chroms)
+            delayed(novel_gene_annotation)(
+                chrom,
+                all_genes,
+                bamfile_path,
+                coverage_threshold_exon,
+                coverage_threshold_splicing,
+                z_score_threshold,
+            )
+            for chrom in chroms
+        )
         annotations = {k: v for result in results for k, v in result.items()}
-    #update existing gene annotation using bam file
+    # update existing gene annotation using bam file
     else:
         geneIDs = list(geneStructureInformation.keys())
-        #re-order geneID
-        #chunks = np.array_split(geneIDs, workers)
-        #geneIDs = [item for sublist in zip(*chunks) for item in sublist]
+        # re-order geneID
+        # chunks = np.array_split(geneIDs, workers)
+        # geneIDs = [item for sublist in zip(*chunks) for item in sublist]
         results = Parallel(n_jobs=workers)(
-            delayed(update_annotation)(geneStructureInformation, geneID, bamfile_path,coverage_threshold_exon, coverage_threshold_splicing, z_score_threshold) for geneID in geneIDs)
+            delayed(update_annotation)(
+                geneStructureInformation,
+                geneID,
+                bamfile_path,
+                coverage_threshold_exon,
+                coverage_threshold_splicing,
+                z_score_threshold,
+            )
+            for geneID in geneIDs
+        )
         annotations = {k: v for result in results for k, v in result.items()}
-    return annotations #{geneID:[geneInfo, exonInfo, isoformInfo]}
+    return annotations  # {geneID:[geneInfo, exonInfo, isoformInfo]}
 
 
-def extract_annotation_info(refGeneFile_gtf_path, refGeneFile_pkl_path, bamfile_path, num_cores=8,
-                            output="geneStructureInformation.pkl", build=None,
-                            coverage_threshold_gene=5, coverage_threshold_exon=0.01,coverage_threshold_splicing=0.01, z_score_threshold = 10,
-                            min_gene_size=50):
+def extract_annotation_info(
+    refGeneFile_gtf_path,
+    refGeneFile_pkl_path,
+    bamfile_path,
+    num_cores=8,
+    output="geneStructureInformation.pkl",
+    build=None,
+    coverage_threshold_gene=5,
+    coverage_threshold_exon=0.01,
+    coverage_threshold_splicing=0.01,
+    z_score_threshold=10,
+    min_gene_size=50,
+    logger=None,
+):
     """
     wrapper function to extract gene annotation information including exons and isoforms
     :param refGeneFile_path: path to gene annotation gtf file, or pickle file that can be directly used
@@ -573,119 +813,203 @@ def extract_annotation_info(refGeneFile_gtf_path, refGeneFile_pkl_path, bamfile_
     :return: metageneStructureInformation
     """
     geneStructureInformation = None
-    meta_output = os.path.join(os.path.dirname(output), 'meta' + os.path.basename(output))
+    meta_output = os.path.join(
+        os.path.dirname(output), "meta" + os.path.basename(output)
+    )
     if refGeneFile_gtf_path is not None:
         genes, exons = ref.generate_reference_df(gtf_path=refGeneFile_gtf_path)
     else:
         genes = None
     #####################################################
-    #option1: ---------rely on bam file alone---------###
+    # option1: ---------rely on bam file alone---------###
     #####################################################
-    if refGeneFile_gtf_path is None and refGeneFile_pkl_path is None and bamfile_path is not None:
-        print('rely on bam file alone to generate gene annotations')
-        geneStructureInformation = annotate_genes(geneStructureInformation = None,
-                                                  bamfile_path = bamfile_path,
-                                                  coverage_threshold_gene=coverage_threshold_gene,
-                                                  coverage_threshold_exon=coverage_threshold_exon,
-                                                  coverage_threshold_splicing = coverage_threshold_splicing,
-                                                  z_score_threshold = z_score_threshold,
-                                                  min_gene_size=min_gene_size,
-                                                  workers=num_cores)#no need to add build
+    if (
+        refGeneFile_gtf_path is None
+        and refGeneFile_pkl_path is None
+        and bamfile_path is not None
+    ):
+        logger.info("rely on bam file alone to generate gene annotations")
+        geneStructureInformation = annotate_genes(
+            geneStructureInformation=None,
+            bamfile_path=bamfile_path,
+            coverage_threshold_gene=coverage_threshold_gene,
+            coverage_threshold_exon=coverage_threshold_exon,
+            coverage_threshold_splicing=coverage_threshold_splicing,
+            z_score_threshold=z_score_threshold,
+            min_gene_size=min_gene_size,
+            workers=num_cores,
+        )  # no need to add build
         if output is not None:
-            with open(output, 'wb') as file:
+            with open(output, "wb") as file:
                 pickle.dump(geneStructureInformation, file)
     #####################################################
     # option2: --------rely on existing annotation alone#
     #####################################################
-    if refGeneFile_pkl_path is None and refGeneFile_gtf_path is not None: ###use gtf
-        print('use the existing gtf file for gene annotations')
-        Genes = list(zip(genes.iloc[:, 3].tolist(), genes.iloc[:, 4].tolist()))  # id, name
-        print(genes)
-        print(Genes)
-        #generate single gene annotations if not existing
-        if os.path.isfile(output) == False:
-            geneStructureInformation = Parallel(n_jobs=num_cores)(delayed(process_gene)(geneID, geneName, genes, exons, build) for geneID, geneName in Genes)
+    if refGeneFile_pkl_path is None and refGeneFile_gtf_path is not None:  ###use gtf
+        logger.info("use the existing gtf file for gene annotations")
+        Genes = list(
+            zip(genes.iloc[:, 3].tolist(), genes.iloc[:, 4].tolist())
+        )  # id, name
+        logger.info("STARTING TRICKY PART")
+        logger.info(genes)
+        logger.info(Genes)
+        # generate single gene annotations if not existing
+        # TODO: Check why it seems stuck in Parallel
+        if not os.path.isfile(output):
+            logger.info("In")
+            logger.info(num_cores)
+
+            geneStructureInformation = []
+            for geneID, geneName in Genes:
+                geneStructureInformation.append(
+                    process_gene(geneID, geneName, genes, exons, build, logger)
+                )
+
+            with ThreadPoolExecutor(max_workers=num_cores) as executor:
+                futures = [
+                    executor.submit(
+                        process_gene, geneID, geneName, genes, exons, build, logger
+                    )
+                    for geneID, geneName in Genes
+                ]
+            geneStructureInformation = [
+                future.result() for future in as_completed(futures)
+            ]
+
+            # geneStructureInformation = Parallel(n_jobs=num_cores)(
+            #     delayed(process_gene)(geneID, geneName, genes, exons, build, logger)
+            #     for geneID, geneName in Genes
+            # )
             geneStructureInformation = dict(geneStructureInformation)
             geneStructureInformation = add_build(geneStructureInformation, build)
-            print('finish generating geneStructureInformation.pkl')
-            #save to output, single gene
+            logger.info("finish generating geneStructureInformation.pkl")
+            # save to output, single gene
             if output is not None:
-                with open(output, 'wb') as file:
+                with open(output, "wb") as file:
                     pickle.dump(geneStructureInformation, file)
-        else:#there exist pre-computate annotation file
-            print('load existing annotation pickle file of each single gene at: '+str(output))
+        else:  # there exist pre-computate annotation file
+            logger.info(
+                "load existing annotation pickle file of each single gene at: "
+                + str(output)
+            )
             geneStructureInformation = load_pickle(output)
-    if refGeneFile_pkl_path is not None: ###use pickle
-        assert refGeneFile_gtf_path is not None, 'gtf reference file is still needed! please input one'
-        print('load existing annotation pickle file of each single gene at: ' + str(refGeneFile_gtf_path))
+    if refGeneFile_pkl_path is not None:  ###use pickle
+        assert refGeneFile_gtf_path is not None, (
+            "gtf reference file is still needed! please input one"
+        )
+        logger.info(
+            "load existing annotation pickle file of each single gene at: "
+            + str(refGeneFile_gtf_path)
+        )
         geneStructureInformation = load_pickle(refGeneFile_pkl_path)
-        #check if geneStructureInformation contains build
+        # check if geneStructureInformation contains build
         if build is not None:
-            if not geneStructureInformation[list(geneStructureInformation.keys())[0]][0]['geneChr'].startswith(build):
+            if not geneStructureInformation[list(geneStructureInformation.keys())[0]][
+                0
+            ]["geneChr"].startswith(build):
                 geneStructureInformation = add_build(geneStructureInformation, build)
-        shutil.copy(refGeneFile_pkl_path, output) #copy existing pickle file over
+        shutil.copy(refGeneFile_pkl_path, output)  # copy existing pickle file over
         ##############################################################
-        #option3: ---------update existing annotation using bam file##
+        # option3: ---------update existing annotation using bam file##
         ##############################################################
         if bamfile_path is not None:
-            print('rely on bam file to update existing gene annotations')
-            output_update = output[:-4]+'updated.pkl'
+            logger.info("rely on bam file to update existing gene annotations")
+            output_update = output[:-4] + "updated.pkl"
             if os.path.isfile(output_update):
-                print('enhanced gene annotation already exist')
+                logger.info("enhanced gene annotation already exist")
                 geneStructureInformation = load_pickle(output_update)
             else:
-                geneStructureInformation = annotate_genes(geneStructureInformation=geneStructureInformation,
-                                                      bamfile_path=bamfile_path,
-                                                      coverage_threshold_gene=coverage_threshold_gene,
-                                                      coverage_threshold_exon=coverage_threshold_exon,
-                                                      coverage_threshold_splicing=coverage_threshold_splicing,
-                                                      z_score_threshold = z_score_threshold,
-                                                      min_gene_size=min_gene_size, workers=num_cores)
+                geneStructureInformation = annotate_genes(
+                    geneStructureInformation=geneStructureInformation,
+                    bamfile_path=bamfile_path,
+                    coverage_threshold_gene=coverage_threshold_gene,
+                    coverage_threshold_exon=coverage_threshold_exon,
+                    coverage_threshold_splicing=coverage_threshold_splicing,
+                    z_score_threshold=z_score_threshold,
+                    min_gene_size=min_gene_size,
+                    workers=num_cores,
+                )
                 if output is not None:
-                    with open(output[:-4]+'updated.pkl', 'wb') as file:
+                    with open(output[:-4] + "updated.pkl", "wb") as file:
                         pickle.dump(geneStructureInformation, file)
     #########group genes into meta-genes########
-    if os.path.isfile(meta_output) == False:
-        print('meta gene information does not exist, will generate.')
-        if genes is None: #bam generated reference
+    if not os.path.isfile(meta_output):
+        logger.info("meta gene information does not exist, will generate.")
+        if genes is None:  # bam generated reference
             geneIDs = list(geneStructureInformation.keys())
             rows = []
             for i, geneID in enumerate(geneIDs):
-                row = [geneStructureInformation[geneID][0]['geneChr'], geneStructureInformation[geneID][0]['geneStart'],
-                geneStructureInformation[geneID][0]['geneEnd'], geneStructureInformation[geneID][0]['geneID'],
-                geneStructureInformation[geneID][0]['geneName'], '.','.', i]
+                row = [
+                    geneStructureInformation[geneID][0]["geneChr"],
+                    geneStructureInformation[geneID][0]["geneStart"],
+                    geneStructureInformation[geneID][0]["geneEnd"],
+                    geneStructureInformation[geneID][0]["geneID"],
+                    geneStructureInformation[geneID][0]["geneName"],
+                    ".",
+                    ".",
+                    i,
+                ]
                 rows.append(row)
             genes = pd.DataFrame(rows)
-        genes.columns = ['CHR', 'START', 'END', 'GENE_ID', 'GENE_NAME', 'GENE_TYPE', 'STRAND', 'META_GENE']
+        genes.columns = [
+            "CHR",
+            "START",
+            "END",
+            "GENE_ID",
+            "GENE_NAME",
+            "GENE_TYPE",
+            "STRAND",
+            "META_GENE",
+        ]
         grouped = genes.groupby("META_GENE")
-        grouped_dict = {key: group.iloc[:, 3].tolist() for key, group in grouped}  # META_GENE STARTS FROM 1
+        grouped_dict = {
+            key: group.iloc[:, 3].tolist() for key, group in grouped
+        }  # META_GENE STARTS FROM 1
         metageneStructureInformation = {}
         for i in range(len(grouped_dict)):
-            meta_gene = 'meta_gene_' + str(i+1)
-            gene_ids = grouped_dict[i+1]
+            meta_gene = "meta_gene_" + str(i + 1)
+            gene_ids = grouped_dict[i + 1]
             meta_gene_info = []
             for id in gene_ids:
                 meta_gene_info.append(geneStructureInformation[id])
             metageneStructureInformation[meta_gene] = meta_gene_info
         # save to output, meta gene
-        with open(meta_output, 'wb') as file:
+        with open(meta_output, "wb") as file:
             pickle.dump(metageneStructureInformation, file)
     else:
-        print('load existing annotation pickle file of meta-gene')
+        logger.info("load existing annotation pickle file of meta-gene")
         metageneStructureInformation = load_pickle(meta_output)
     return metageneStructureInformation
+
 
 def add_build(geneStructureInformation, build):
     if build is not None:
         keys = list(geneStructureInformation.keys())
         for key in keys:
-            geneStructureInformation[key][0]['geneChr'] = build + '_' + geneStructureInformation[key][0]['geneChr']
+            geneStructureInformation[key][0]["geneChr"] = (
+                build + "_" + geneStructureInformation[key][0]["geneChr"]
+            )
     return geneStructureInformation
 
+
 class Annotator:
-    def __init__(self, target:list, reference_gtf_path:str, reference_pkl_path:str, bam_path:list, update_gtf, workers,
-                 coverage_threshold_gene, coverage_threshold_exon, coverage_threshold_splicing,z_score_threshold,
-                 min_gene_size, build = None, platform = '10x-ont', logger = None):
+    def __init__(
+        self,
+        target: list,
+        reference_gtf_path: str,
+        reference_pkl_path: str,
+        bam_path: list,
+        update_gtf,
+        workers,
+        coverage_threshold_gene,
+        coverage_threshold_exon,
+        coverage_threshold_splicing,
+        z_score_threshold,
+        min_gene_size,
+        build=None,
+        platform="10x-ont",
+        logger=None,
+    ):
         """
         target: root path to save annotation files. SCOTCH will automatically create sub folders
         reference_gtf: path to gtf annotation (optional)
@@ -694,8 +1018,8 @@ class Annotator:
         build: parse parameter
         """
         self.logger = logger
-        self.multiple_bam = True if len(bam_path)>1 else False
-        self.multiple_samples = True if len(target)>1 else False
+        self.multiple_bam = True if len(bam_path) > 1 else False
+        self.multiple_samples = True if len(target) > 1 else False
         self.workers = workers
         self.target = target
         self.reference_gtf_path = reference_gtf_path
@@ -704,126 +1028,177 @@ class Annotator:
         self.update_gtf = update_gtf
         self.build = build
         self.platform = platform
-        self.parse = self.platform == 'parse-ont'
-        self.pacbio = self.platform == '10x-pacbio'
+        self.parse = self.platform == "parse-ont"
+        self.pacbio = self.platform == "10x-pacbio"
         # gene annotation information
         self.annotation_folder_path = [os.path.join(t, "reference") for t in target]
-        self.annotation_path_single_gene = [os.path.join(t, "reference/geneStructureInformation.pkl") for t in target]
-        self.annotation_path_meta_gene = [os.path.join(t, "reference/metageneStructureInformation.pkl") for t in target]
+        self.annotation_path_single_gene = [
+            os.path.join(t, "reference/geneStructureInformation.pkl") for t in target
+        ]
+        self.annotation_path_meta_gene = [
+            os.path.join(t, "reference/metageneStructureInformation.pkl")
+            for t in target
+        ]
         # bam information
         self.bamInfo_folder_path = [os.path.join(t, "bam") for t in target]
-        self.bamInfo_pkl_path = [os.path.join(t, 'bam/bam.Info.pkl') for t in target]
-        self.bamInfo2_pkl_path = [os.path.join(t, 'bam/bam.Info2.pkl') for t in target]
-        self.bamInfo3_pkl_path = [os.path.join(t, 'bam/bam.Info3.pkl') for t in target]  # only available for parse
-        self.bamInfo_csv_path = [os.path.join(t, 'bam/bam.Info.csv') for t in target]
+        self.bamInfo_pkl_path = [os.path.join(t, "bam/bam.Info.pkl") for t in target]
+        self.bamInfo2_pkl_path = [os.path.join(t, "bam/bam.Info2.pkl") for t in target]
+        self.bamInfo3_pkl_path = [
+            os.path.join(t, "bam/bam.Info3.pkl") for t in target
+        ]  # only available for parse
+        self.bamInfo_csv_path = [os.path.join(t, "bam/bam.Info.csv") for t in target]
         # some parameters
         self.coverage_threshold_gene = coverage_threshold_gene
         self.coverage_threshold_exon = coverage_threshold_exon
         self.coverage_threshold_splicing = coverage_threshold_splicing
         self.z_score_threshold = z_score_threshold
         self.min_gene_size = min_gene_size
+
     def annotate_genes(self):
         for i in range(len(self.target)):
             if not os.path.exists(self.annotation_folder_path[i]):
                 os.makedirs(self.annotation_folder_path[i])
-            if os.path.isfile(self.annotation_path_single_gene[i]) and os.path.isfile(self.annotation_path_meta_gene[i]):
-                self.logger.info(f'Complete gene annotation information exist at {self.annotation_path_single_gene[i]} and {self.annotation_path_meta_gene[i]}')
+            if os.path.isfile(self.annotation_path_single_gene[i]) and os.path.isfile(
+                self.annotation_path_meta_gene[i]
+            ):
+                self.logger.info(
+                    f"Complete gene annotation information exist at {self.annotation_path_single_gene[i]} and {self.annotation_path_meta_gene[i]}"
+                )
             else:
-                if i==0:
+                if i == 0:
                     self.logger.info(
-                        f'Complete gene annotation information does not exist, we will generate...')
-                    #annotation free mode
-                    if self.reference_gtf_path is None and self.reference_pkl_path is None:
-                        self.logger.info(f'Annotation-free Mode: we will rely on given bam files to generate gene annotations')
-                        _ = extract_annotation_info(self.reference_gtf_path, self.reference_pkl_path,
-                                                    self.bam_path, self.workers,
-                                                    self.annotation_path_single_gene[i], self.build,
-                                                    self.coverage_threshold_gene, self.coverage_threshold_exon,
-                                                    self.coverage_threshold_splicing,self.z_score_threshold,
-                                                    self.min_gene_size)
+                        f"Complete gene annotation information does not exist, we will generate..."
+                    )
+                    # annotation free mode
+                    if (
+                        self.reference_gtf_path is None
+                        and self.reference_pkl_path is None
+                    ):
+                        self.logger.info(
+                            f"Annotation-free Mode: we will rely on given bam files to generate gene annotations"
+                        )
+                        _ = extract_annotation_info(
+                            self.reference_gtf_path,
+                            self.reference_pkl_path,
+                            self.bam_path,
+                            self.workers,
+                            self.annotation_path_single_gene[i],
+                            self.build,
+                            self.coverage_threshold_gene,
+                            self.coverage_threshold_exon,
+                            self.coverage_threshold_splicing,
+                            self.z_score_threshold,
+                            self.min_gene_size,
+                            self.logger,
+                        )
                     if self.update_gtf:
                         self.logger.info(
-                            f'Enhanced-annotation Mode: we will update existing gene annotations using given bam files')
-                        _ = extract_annotation_info(self.reference_gtf_path, self.reference_pkl_path,
-                                                    self.bam_path, self.workers,
-                                                    self.annotation_path_single_gene[i], self.build,
-                                                    self.coverage_threshold_gene, self.coverage_threshold_exon,
-                                                    self.coverage_threshold_splicing,self.z_score_threshold,
-                                                    self.min_gene_size)
+                            f"Enhanced-annotation Mode: we will update existing gene annotations using given bam files"
+                        )
+                        _ = extract_annotation_info(
+                            self.reference_gtf_path,
+                            self.reference_pkl_path,
+                            self.bam_path,
+                            self.workers,
+                            self.annotation_path_single_gene[i],
+                            self.build,
+                            self.coverage_threshold_gene,
+                            self.coverage_threshold_exon,
+                            self.coverage_threshold_splicing,
+                            self.z_score_threshold,
+                            self.min_gene_size,
+                            self.logger,
+                        )
                     else:
                         self.logger.info(
-                            f'Annotation-only Mode: we will only use existing gene annotations')
-                        _ = extract_annotation_info(self.reference_gtf_path, self.reference_pkl_path,
-                                                    None, self.workers,
-                                                    self.annotation_path_single_gene[i], self.build,
-                                                    self.coverage_threshold_gene, self.coverage_threshold_exon,
-                                                    self.coverage_threshold_splicing,self.z_score_threshold,
-                                                    self.min_gene_size)
+                            f"Annotation-only Mode: we will only use existing gene annotations"
+                        )
+                        _ = extract_annotation_info(
+                            self.reference_gtf_path,
+                            self.reference_pkl_path,
+                            None,
+                            self.workers,
+                            self.annotation_path_single_gene[i],
+                            self.build,
+                            self.coverage_threshold_gene,
+                            self.coverage_threshold_exon,
+                            self.coverage_threshold_splicing,
+                            self.z_score_threshold,
+                            self.min_gene_size,
+                            self.logger,
+                        )
                 else:
                     # Copy the generated files from the first target to the current target
-                    self.logger.info(f'Copying generated files from {self.annotation_path_single_gene[0]} to {self.annotation_path_single_gene[i]}')
-                    shutil.copy(self.annotation_path_meta_gene[0], self.annotation_path_meta_gene[i])
+                    self.logger.info(
+                        f"Copying generated files from {self.annotation_path_single_gene[0]} to {self.annotation_path_single_gene[i]}"
+                    )
+                    shutil.copy(
+                        self.annotation_path_meta_gene[0],
+                        self.annotation_path_meta_gene[i],
+                    )
 
     def annotation_bam(self, barcode_cell, barcode_umi):
         for i in range(len(self.target)):
             if not os.path.exists(self.bamInfo_folder_path[i]):
                 os.makedirs(self.bamInfo_folder_path[i])
-            if os.path.isfile(self.bamInfo_pkl_path[i]) == True and os.path.isfile(self.bamInfo_csv_path[i]) == True:
-                self.logger.info(f'bam file information exist at {self.bamInfo_pkl_path[i]} and {self.bamInfo_csv_path[i]}')
-            if os.path.isfile(self.bamInfo_pkl_path[i]) == False and os.path.isfile(self.bamInfo_csv_path[i]) == True:
-                self.logger.info('Extracting bam file pickle information')
+            if (
+                os.path.isfile(self.bamInfo_pkl_path[i]) == True
+                and os.path.isfile(self.bamInfo_csv_path[i]) == True
+            ):
+                self.logger.info(
+                    f"bam file information exist at {self.bamInfo_pkl_path[i]} and {self.bamInfo_csv_path[i]}"
+                )
+            if (
+                os.path.isfile(self.bamInfo_pkl_path[i]) == False
+                and os.path.isfile(self.bamInfo_csv_path[i]) == True
+            ):
+                self.logger.info("Extracting bam file pickle information")
                 bam_info = pd.read_csv(self.bamInfo_csv_path[i])
-                qname_dict, qname_cbumi_dict, qname_sample_dict = bam_info_to_dict(bam_info, self.parse)
-                with open(self.bamInfo_pkl_path[i], 'wb') as file:
+                qname_dict, qname_cbumi_dict, qname_sample_dict = bam_info_to_dict(
+                    bam_info, self.parse
+                )
+                with open(self.bamInfo_pkl_path[i], "wb") as file:
                     pickle.dump(qname_dict, file)
-                with open(self.bamInfo2_pkl_path[i], 'wb') as file:
+                with open(self.bamInfo2_pkl_path[i], "wb") as file:
                     pickle.dump(qname_cbumi_dict, file)
                 if qname_sample_dict is not None:
-                    with open(self.bamInfo3_pkl_path[i], 'wb') as file:
+                    with open(self.bamInfo3_pkl_path[i], "wb") as file:
                         pickle.dump(qname_sample_dict, file)
-            if os.path.isfile(self.bamInfo_pkl_path[i]) == False and os.path.isfile(self.bamInfo_csv_path[i]) == False:
-                self.logger.info('Extracting bam file information')
-                if os.path.isfile(self.bam_path[i])==False:
-                    bam_info = extract_bam_info_folder(self.bam_path[i], self.workers, self.parse, self.pacbio,barcode_cell, barcode_umi)
+            if (
+                os.path.isfile(self.bamInfo_pkl_path[i]) == False
+                and os.path.isfile(self.bamInfo_csv_path[i]) == False
+            ):
+                self.logger.info("Extracting bam file information")
+                if os.path.isfile(self.bam_path[i]) == False:
+                    bam_info = extract_bam_info_folder(
+                        self.bam_path[i],
+                        self.workers,
+                        self.parse,
+                        self.pacbio,
+                        barcode_cell,
+                        barcode_umi,
+                        self.logger,
+                    )
                 else:
                     if self.parse:
                         bam_info = extract_bam_info_parse(self.bam_path[i])
                     elif self.pacbio:
-                        bam_info = extract_bam_info_pacbio(self.bam_path[i],barcode_cell, barcode_umi)
+                        bam_info = extract_bam_info_pacbio(
+                            self.bam_path[i], barcode_cell, barcode_umi
+                        )
                     else:
-                        bam_info = extract_bam_info(self.bam_path[i],barcode_cell, barcode_umi)
+                        bam_info = extract_bam_info(
+                            self.bam_path[i], barcode_cell, barcode_umi
+                        )
                 bam_info.to_csv(self.bamInfo_csv_path[i])
-                self.logger.info('Generating bam file pickle information')
-                qname_dict, qname_cbumi_dict, qname_sample_dict = bam_info_to_dict(bam_info, self.parse)
-                with open(self.bamInfo_pkl_path[i], 'wb') as file:
+                self.logger.info("Generating bam file pickle information")
+                qname_dict, qname_cbumi_dict, qname_sample_dict = bam_info_to_dict(
+                    bam_info, self.parse
+                )
+                with open(self.bamInfo_pkl_path[i], "wb") as file:
                     pickle.dump(qname_dict, file)
-                with open(self.bamInfo2_pkl_path[i], 'wb') as file:
+                with open(self.bamInfo2_pkl_path[i], "wb") as file:
                     pickle.dump(qname_cbumi_dict, file)
                 if qname_sample_dict is not None:
-                    with open(self.bamInfo3_pkl_path[i], 'wb') as file:
+                    with open(self.bamInfo3_pkl_path[i], "wb") as file:
                         pickle.dump(qname_sample_dict, file)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

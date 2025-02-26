@@ -1,14 +1,15 @@
 #!/usr/bin/env python
 
 import argparse
-import count_matrix as cm
+import logging
 import os
+import shutil
+import subprocess
+
 import annotation as annot
 import compatible as cp
-import logging
-import shutil
+import count_matrix as cm
 import visualization as vis
-import subprocess
 
 parser = argparse.ArgumentParser(description='SCOTCH preprocessing pipeline')
 #mandatory options
@@ -72,34 +73,35 @@ def setup_logger(target, task_name):
     logger.setLevel(logging.INFO)
     if logger.hasHandlers():
         logger.handlers.clear()
-    log_file = os.path.join(target, f'{task_name}.log')
+    log_file = os.path.join(target, f"{task_name}.log")
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.INFO)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.ERROR)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
     return logger, log_file
 
+
 def copy_log_to_targets(log_file, targets):
     for target in targets[1:]:
-        shutil.copy(log_file, os.path.join(target, 'annotation.log'))
+        shutil.copy(log_file, os.path.join(target, "annotation.log"))
 
 
 def main():
     global args
     args = parser.parse_args()
-    if args.reference_pkl=='None':
+    if args.reference_pkl == "None":
         args.reference_pkl = None
-    if args.platform=='10x-ont':
+    if args.platform == "10x-ont":
         if args.barcode_cell is None:
             args.barcode_cell = "CB"
         if args.barcode_umi is None:
             args.barcode_umi = "UB"
-    elif args.platform == '10x-pacbio':
+    elif args.platform == "10x-pacbio":
         if args.barcode_cell is None:
             args.barcode_cell = "CB"
         if args.barcode_umi is None:
@@ -107,117 +109,179 @@ def main():
     for t in args.target:
         if not os.path.exists(t):
             os.makedirs(t)
+
     def run_annotation():
-        logger, log_file = setup_logger(args.target[0], 'annotation')
-        logger.info('Start annotation step for all targets.')
-        logger.info(f'Target directories: {args.target}')
-        logger.info(f'Reference annotation file: {args.reference}')
-        logger.info(f'Reference annotation pickle file: {args.reference_pkl}')
-        logger.info(f'Update GTF option: {args.update_gtf}')
-        logger.info(f'BAM files: {args.bam}')
-        logger.info(f'Platform: {args.platform}')
-        logger.info(f'Coverage threshold (gene): {args.coverage_threshold_gene}')
-        logger.info(f'Coverage threshold (exon): {args.coverage_threshold_exon}')
-        logger.info(f'Coverage threshold (splicing): {args.coverage_threshold_splicing}')
-        logger.info(f'Z-score threshold: {args.z_score_threshold}')
-        logger.info(f'Minimum gene size: {args.min_gene_size}')
-        annotator = annot.Annotator(target=args.target,
-                                    reference_gtf_path=args.reference, reference_pkl_path = args.reference_pkl,
-                                    bam_path=args.bam, update_gtf=args.update_gtf,
-                                    workers=args.workers, coverage_threshold_gene=args.coverage_threshold_gene,
-                                    coverage_threshold_exon=args.coverage_threshold_exon,
-                                    coverage_threshold_splicing=args.coverage_threshold_splicing,
-                                    z_score_threshold=args.z_score_threshold,
-                                    min_gene_size=args.min_gene_size, build=args.build, platform=args.platform,
-                                    logger=logger)
+        logger, log_file = setup_logger(args.target[0], "annotation")
+        logger.info("Start annotation step for all targets.")
+        logger.info(f"Target directories: {args.target}")
+        logger.info(f"Reference annotation file: {args.reference}")
+        logger.info(f"Reference annotation pickle file: {args.reference_pkl}")
+        logger.info(f"Update GTF option: {args.update_gtf}")
+        logger.info(f"BAM files: {args.bam}")
+        logger.info(f"Platform: {args.platform}")
+        logger.info(f"Coverage threshold (gene): {args.coverage_threshold_gene}")
+        logger.info(f"Coverage threshold (exon): {args.coverage_threshold_exon}")
+        logger.info(
+            f"Coverage threshold (splicing): {args.coverage_threshold_splicing}"
+        )
+        logger.info(f"Z-score threshold: {args.z_score_threshold}")
+        logger.info(f"Minimum gene size: {args.min_gene_size}")
+        annotator = annot.Annotator(
+            target=args.target,
+            reference_gtf_path=args.reference,
+            reference_pkl_path=args.reference_pkl,
+            bam_path=args.bam,
+            update_gtf=args.update_gtf,
+            workers=args.workers,
+            coverage_threshold_gene=args.coverage_threshold_gene,
+            coverage_threshold_exon=args.coverage_threshold_exon,
+            coverage_threshold_splicing=args.coverage_threshold_splicing,
+            z_score_threshold=args.z_score_threshold,
+            min_gene_size=args.min_gene_size,
+            build=args.build,
+            platform=args.platform,
+            logger=logger,
+        )
         # generate gene annotation
+
         logger.info('Start generating gene annotation.')
-        #annotator.annotate_genes()
+        annotator.annotate_genes()
 
         # bam information
         if not args.no_bam_annotation:
             logger.info('Start processing bam file information.')
             annotator.annotation_bam(args.barcode_cell, args.barcode_umi)
+            
+        copy_log_to_targets(log_file, args.target)
 
-        copy_log_to_targets(log_file, args.target)
     def run_compatible():
-        logger, log_file = setup_logger(args.target[0], 'compatible')
-        logger.info(f'Start generating compatible matrix step for all targets. Job: {args.job_index}')
-        logger.info(f'Target directories: {args.target}. Job: {args.job_index}')
-        logger.info(f'BAM files: {args.bam}. Job: {args.job_index}')
-        logger.info(f'Lowest match: {args.match_low}. Job: {args.job_index}')
-        logger.info(f'Highest match: {args.match_high}. Job: {args.job_index}')
-        logger.info(f'Small exon threshold (low): {args.small_exon_threshold}. Job: {args.job_index}')
-        logger.info(f'Small exon threshold (high): min(average exon length, {args.small_exon_threshold_high}). Job: {args.job_index}')
-        logger.info(f'Truncation match: {args.truncation_match} or 100bps. Job: {args.job_index}')
-        logger.info(f'Platform: {args.platform}. Job: {args.job_index}')
-        logger.info(f'Reference GTF Path: {args.reference}. Job: {args.job_index}')
-        logger.info(f'Update GTF option: {args.update_gtf}. Job: {args.job_index}')
-        readmapper = cp.ReadMapper(target=args.target, bam_path = args.bam,
-                                   lowest_match=args.match_low, lowest_match1=args.match_high,
-                                    small_exon_threshold = args.small_exon_threshold,
-                                   small_exon_threshold1=args.small_exon_threshold_high,
-                                   truncation_match = args.truncation_match,
-                                   platform = args.platform, reference_gtf_path=args.reference,
-                                   logger = logger)
-        readmapper.map_reads_allgenes(cover_existing=True,total_jobs=args.total_jobs,current_job_index=args.job_index)
-        logger.info(f'saving annotations with identified novel isoforms  Job: {args.job_index}')
-        readmapper.save_annotation_w_novel_isoform(total_jobs=args.total_jobs,current_job_index=args.job_index)
-        logger.info(f'Completed generating compatible matrix for all targets.  Job: {args.job_index}')
+        logger, log_file = setup_logger(args.target[0], "compatible")
+        logger.info(
+            f"Start generating compatible matrix step for all targets. Job: {args.job_index}"
+        )
+        logger.info(f"Target directories: {args.target}. Job: {args.job_index}")
+        logger.info(f"BAM files: {args.bam}. Job: {args.job_index}")
+        logger.info(f"Lowest match: {args.match_low}. Job: {args.job_index}")
+        logger.info(f"Highest match: {args.match_high}. Job: {args.job_index}")
+        logger.info(
+            f"Small exon threshold (low): {args.small_exon_threshold}. Job: {args.job_index}"
+        )
+        logger.info(
+            f"Small exon threshold (high): min(average exon length, {args.small_exon_threshold_high}). Job: {args.job_index}"
+        )
+        logger.info(
+            f"Truncation match: {args.truncation_match} or 100bps. Job: {args.job_index}"
+        )
+        logger.info(f"Platform: {args.platform}. Job: {args.job_index}")
+        logger.info(f"Reference GTF Path: {args.reference}. Job: {args.job_index}")
+        logger.info(f"Update GTF option: {args.update_gtf}. Job: {args.job_index}")
+        readmapper = cp.ReadMapper(
+            target=args.target,
+            bam_path=args.bam,
+            lowest_match=args.match_low,
+            lowest_match1=args.match_high,
+            small_exon_threshold=args.small_exon_threshold,
+            small_exon_threshold1=args.small_exon_threshold_high,
+            truncation_match=args.truncation_match,
+            platform=args.platform,
+            reference_gtf_path=args.reference,
+            logger=logger,
+        )
+        readmapper.map_reads_allgenes(
+            cover_existing=True,
+            total_jobs=args.total_jobs,
+            current_job_index=args.job_index,
+        )
+        logger.info(
+            f"saving annotations with identified novel isoforms  Job: {args.job_index}"
+        )
+        readmapper.save_annotation_w_novel_isoform(
+            total_jobs=args.total_jobs, current_job_index=args.job_index
+        )
+        logger.info(
+            f"Completed generating compatible matrix for all targets.  Job: {args.job_index}"
+        )
         copy_log_to_targets(log_file, args.target)
+
     def run_count():
         # target has to be len 1 for parse platform
-        logger, log_file = setup_logger(args.target[0], 'count')
-        logger.info('Start generating count matrix for all targets.')
-        logger.info(f'Target directories: {args.target}')
-        logger.info(f'Novel read threshold: {args.novel_read_n}')
-        logger.info(f'Platform: {args.platform}')
-        logger.info(f'Group novel isoforms: {args.group_novel}')
-        logger.info(f'Workers: {args.workers}')
-        logger.info(f'saving count matrix csv: {args.save_csv}')
-        logger.info(f'saving count matrix mtx: {args.save_mtx}')
-        countmatrix = cm.CountMatrix(target = args.target, novel_read_n = args.novel_read_n,
-                                        platform = args.platform, workers = args.workers,
-                                     group_novel = args.group_novel, logger = logger,
-                                     csv = args.save_csv, mtx = args.save_mtx)
-        if args.platform=='parse':
-            assert len(args.target) == 1, "Error: The length of target must be 1 when platform is 'parse'."
+        logger, log_file = setup_logger(args.target[0], "count")
+        logger.info("Start generating count matrix for all targets.")
+        logger.info(f"Target directories: {args.target}")
+        logger.info(f"Novel read threshold: {args.novel_read_n}")
+        logger.info(f"Platform: {args.platform}")
+        logger.info(f"Group novel isoforms: {args.group_novel}")
+        logger.info(f"Workers: {args.workers}")
+        logger.info(f"saving count matrix csv: {args.save_csv}")
+        logger.info(f"saving count matrix mtx: {args.save_mtx}")
+        countmatrix = cm.CountMatrix(
+            target=args.target,
+            novel_read_n=args.novel_read_n,
+            platform=args.platform,
+            workers=args.workers,
+            group_novel=args.group_novel,
+            logger=logger,
+            csv=args.save_csv,
+            mtx=args.save_mtx,
+        )
+        if args.platform == "parse":
+            assert len(args.target) == 1, (
+                "Error: The length of target must be 1 when platform is 'parse'."
+            )
         countmatrix.generate_multiple_samples()
-        logger.info('Saving count matrix')
+        logger.info("Saving count matrix")
         countmatrix.save_multiple_samples()
         countmatrix.filter_gtf()
-        logger.info('Completed generating count matrix for all targets.')
+        logger.info("Completed generating count matrix for all targets.")
         copy_log_to_targets(log_file, args.target)
+
     def run_summary():
-        logger, log_file = setup_logger(args.target[0], 'summary')
-        logger.info('Start summarizing read isoform mapping and annotations for all targets.')
-        logger.info(f'Target directories: {args.target}')
+        logger, log_file = setup_logger(args.target[0], "summary")
+        logger.info(
+            "Start summarizing read isoform mapping and annotations for all targets."
+        )
+        logger.info(f"Target directories: {args.target}")
         for i in range(len(args.target)):
-            logger.info(f'Start summarizing annotation for target: {args.target[i]}')
+            logger.info(f"Start summarizing annotation for target: {args.target[i]}")
             cp.summarise_annotation(args.target[i])
-            logger.info(f'Start summarizing read mapping information for target: {args.target[i]}')
+            logger.info(
+                f"Start summarizing read mapping information for target: {args.target[i]}"
+            )
             cp.summarise_auxillary(args.target[i])
-        logger.info('Completed summarizing annotations and auxiliary information for all targets.')
+        logger.info(
+            "Completed summarizing annotations and auxiliary information for all targets."
+        )
         copy_log_to_targets(log_file, args.target)
 
-    if args.task=='annotation':
+    if args.task == "annotation":
         run_annotation()
-    if args.task=='compatible matrix':#task is to generate compatible matrix
+    if args.task == "compatible matrix":  # task is to generate compatible matrix
         run_compatible()
-    if args.task == 'summary':
+    if args.task == "summary":
         run_summary()
-    if args.task == 'count matrix': # task is to generate count matrix
+    if args.task == "count matrix":  # task is to generate count matrix
         run_count()
 
-    if args.task =='all':
+    if args.task == "all":
         run_annotation()
         run_compatible()
         run_summary()
         run_count()
 
-    if args.task =='visualization': #currently only support 10X file structure
-        vis.visualization(args.gene, args.bam, args.target, args.novel_pct, args.junction_num, args.target_vis,
-                          args.sample_names, args.width, args.height, args.annotation_scale)
+    if args.task == "visualization":  # currently only support 10X file structure
+        vis.visualization(
+            args.gene,
+            args.bam,
+            args.target,
+            args.novel_pct,
+            args.junction_num,
+            args.target_vis,
+            args.sample_names,
+            args.width,
+            args.height,
+            args.annotation_scale,
+        )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
