@@ -10,11 +10,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 import pysam
-from joblib import Parallel, delayed
-from scipy.ndimage import gaussian_filter1d
-
 import reference as ref
+from joblib import Parallel, delayed
 from preprocessing import load_pickle, merge_exons
+from scipy.ndimage import gaussian_filter1d
 
 ######################################################################
 ##############################annotation##############################
@@ -28,8 +27,10 @@ def extract_bam_info_folder(
     pacbio=False,
     barcode_cell=None,
     barcode_umi=None,
+    logger=None,
 ):
     files = os.listdir(bam_folder)
+    logger.info("STARTING EXTRACTION OF BAM INFO FOLDER")
     bamfiles = [os.path.join(bam_folder, f) for f in files if f.endswith(".bam")]
     if parse:
         bamfiles = [bam for bam in bamfiles if bam + ".bai" in files]
@@ -51,6 +52,7 @@ def extract_bam_info_folder(
 
 
 def extract_bam_info(bam, barcode_cell="CB", barcode_umi="UB"):
+    print("BAM INFO STEP")
     # extract readname, cb, umi from bam file
     # bam: path to bam file
     bamFilePysam = pysam.Samfile(bam, "rb")
@@ -78,6 +80,7 @@ def extract_bam_info(bam, barcode_cell="CB", barcode_umi="UB"):
 
 
 def extract_bam_info_parse(bam):
+    print("BAM INFO STEP - PARSE")
     bamFilePysam = pysam.Samfile(bam, "rb")
     match = re.search(r"sublibrary(\d+)", bam)
     if match:
@@ -119,6 +122,7 @@ def extract_bam_info_parse(bam):
 
 
 def extract_bam_info_pacbio(bam, barcode_cell="XC", barcode_umi="XM"):
+    print("BAM INFO STEP - PACBIO")
     bamFilePysam = pysam.Samfile(bam, "rb")
     # qname cb umi cbumi length
     ReadTags = [
@@ -1179,6 +1183,7 @@ class Annotator:
                         self.pacbio,
                         barcode_cell,
                         barcode_umi,
+                        self.logger,
                     )
                 else:
                     if self.parse:
