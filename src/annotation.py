@@ -850,9 +850,7 @@ def extract_annotation_info(
         Genes = list(
             zip(genes.iloc[:, 3].tolist(), genes.iloc[:, 4].tolist())
         )  # id, name
-        logger.info("STARTING TRICKY PART")
-        logger.info(genes)
-        logger.info(Genes)
+
         # generate single gene annotations if not existing
         # TODO: Check why it seems stuck in Parallel
         if not os.path.isfile(output):
@@ -909,29 +907,32 @@ def extract_annotation_info(
             ]["geneChr"].startswith(build):
                 geneStructureInformation = add_build(geneStructureInformation, build)
         shutil.copy(refGeneFile_pkl_path, output)  # copy existing pickle file over
-        ##############################################################
-        # option3: ---------update existing annotation using bam file##
-        ##############################################################
-        if bamfile_path is not None:
-            logger.info("rely on bam file to update existing gene annotations")
-            output_update = output[:-4] + "updated.pkl"
-            if os.path.isfile(output_update):
-                logger.info("enhanced gene annotation already exist")
-                geneStructureInformation = load_pickle(output_update)
-            else:
-                geneStructureInformation = annotate_genes(
-                    geneStructureInformation=geneStructureInformation,
-                    bamfile_path=bamfile_path,
-                    coverage_threshold_gene=coverage_threshold_gene,
-                    coverage_threshold_exon=coverage_threshold_exon,
-                    coverage_threshold_splicing=coverage_threshold_splicing,
-                    z_score_threshold=z_score_threshold,
-                    min_gene_size=min_gene_size,
-                    workers=num_cores,
-                )
-                if output is not None:
-                    with open(output[:-4] + "updated.pkl", "wb") as file:
-                        pickle.dump(geneStructureInformation, file)
+
+    ##############################################################
+    # option3: ---------update existing annotation using bam file##
+    ##############################################################
+    if bamfile_path is not None and geneStructureInformation is not None:
+        logger.info("Rely on bam file to update existing gene annotations")
+        output_update = output[:-4] + "updated.pkl"
+        if os.path.isfile(output_update):
+            logger.info("enhanced gene annotation already exist")
+            geneStructureInformation = load_pickle(output_update)
+        else:
+            logger.info("Start generating updated pkl file")
+            geneStructureInformation = annotate_genes(
+                geneStructureInformation=geneStructureInformation,
+                bamfile_path=bamfile_path,
+                coverage_threshold_gene=coverage_threshold_gene,
+                coverage_threshold_exon=coverage_threshold_exon,
+                coverage_threshold_splicing=coverage_threshold_splicing,
+                z_score_threshold=z_score_threshold,
+                min_gene_size=min_gene_size,
+                workers=num_cores,
+            )
+            if output is not None:
+                with open(output[:-4] + "updated.pkl", "wb") as file:
+                    pickle.dump(geneStructureInformation, file)
+
     #########group genes into meta-genes########
     if not os.path.isfile(meta_output):
         logger.info("meta gene information does not exist, will generate.")
