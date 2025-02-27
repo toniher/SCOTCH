@@ -130,7 +130,7 @@ def convert_to_gtf(
     )
 
 
-def summarise_annotation(target):
+def summarise_annotation(target, logger):
     reference_folders = []
     for root, dirs, files in os.walk(target):
         if "reference" in dirs:
@@ -158,7 +158,7 @@ def summarise_annotation(target):
         ]
         if len(file_names_pkl) > 0 and len(file_names_gtf) > 0:
             # merge pkl annotation file
-            print("merging new isoform annotations")
+            logger.info("merging new isoform annotations")
             metageneStructureInformationwNovel = {}
             for file_name_pkl in file_names_pkl:
                 metageneStructureInformation = load_pickle(file_name_pkl)
@@ -173,9 +173,9 @@ def summarise_annotation(target):
                 pickle.dump(metageneStructureInformationwNovel, file)
             for file_name_pkl in file_names_pkl:
                 os.remove(file_name_pkl)
-            print("mergered new isoform annotation saved at: " + str(output_pkl))
+            logger.info("mergered new isoform annotation saved at: " + str(output_pkl))
             # merge gtf annotation file
-            print("Merging new GTF annotations...")
+            logger.info("Merging new GTF annotations...")
             gtf_lines = []
             for file_name_gtf in file_names_gtf:
                 with open(file_name_gtf, "r") as gtf_file:
@@ -187,12 +187,12 @@ def summarise_annotation(target):
                     output_gtf_file.write(line + "\n")
             for file_name_gtf in file_names_gtf:
                 os.remove(file_name_gtf)
-            print("Merged GTF annotations saved at: " + output_gtf)
+            logger.info("Merged GTF annotations saved at: " + output_gtf)
         else:
-            print("novel isoform annotations does not exist!")
+            logger.info("novel isoform annotations does not exist!")
 
 
-def summarise_auxillary(target):
+def summarise_auxillary(target, logger):
     def process_group(group):
         highest_priority = group["priority"].max()
         highest_priority_rows = group[group["priority"] == highest_priority]
@@ -218,7 +218,9 @@ def summarise_auxillary(target):
         if "auxillary" in dirs:
             auxillary_folders.append(os.path.join(root, "auxillary"))
     for auxillary_folder in auxillary_folders:
-        print("summarising read-isoform mapping files at: " + str(auxillary_folder))
+        logger.info(
+            "summarising read-isoform mapping files at: " + str(auxillary_folder)
+        )
         file_paths = [
             os.path.join(auxillary_folder, f)
             for f in os.listdir(auxillary_folder)
@@ -252,7 +254,7 @@ def summarise_auxillary(target):
         DF_multiple = DF[multiple_mask].copy()
         grouped = DF_multiple.groupby(["Read"], group_keys=False)
         # Process groups in parallel and concatenate results
-        print("Processing groups for multiple reads...")
+        logger.info("Processing groups for multiple reads...")
         processed_groups = Parallel(n_jobs=-1)(
             delayed(process_group)(group) for _, group in grouped
         )
@@ -261,14 +263,14 @@ def summarise_auxillary(target):
         output_file_tsv = os.path.join(
             auxillary_folder, "all_read_isoform_exon_mapping.tsv"
         )
-        print("saving read-isoform mapping file: " + str(output_file_tsv))
+        logger.info("saving read-isoform mapping file: " + str(output_file_tsv))
         DF_final.to_csv(output_file_tsv, sep="\t", index=False)
-        print("removing temporary files in: " + str(auxillary_folder))
+        logger.info("removing temporary files in: " + str(auxillary_folder))
         for file in file_paths:
             os.remove(file)
         output_file_pkl = os.path.join(auxillary_folder, "read_selection.pkl")
         cbumi_keep_dict = DF_final.set_index("CBUMI")["Keep"].to_dict()
-        print("saving read filtering file: " + str(output_file_pkl))
+        logger.info("saving read filtering file: " + str(output_file_pkl))
         with open(output_file_pkl, "wb") as pickle_file:
             pickle.dump(cbumi_keep_dict, pickle_file)
 
