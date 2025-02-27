@@ -10,7 +10,11 @@ from preprocessing import *
 
 
 def convert_to_gtf(
-    metageneStructureInformationNovel, output_file, gtf_df=None, num_cores=1
+    metageneStructureInformationNovel,
+    output_file,
+    gtf_df=None,
+    num_cores=1,
+    logger=None,
 ):
     def update_annotation_gene(geneID, gtf_df, geneStructureInformationwNovel):
         gtf_df_sub = gtf_df[
@@ -109,11 +113,18 @@ def convert_to_gtf(
     ]
     if gtf_df is None:
         gtf_df = pd.DataFrame(columns=column_names)
-    gtf_df_gene_list = Parallel(n_jobs=num_cores)(
-        delayed(update_annotation_gene)(geneID, gtf_df, geneStructureInformationwNovel)
-        for geneID in geneIDs
-    )
+
+    gtf_df_gene_list = []
+    for geneID in geneIDs:
+        result = update_annotation_gene(geneID, gtf_df, geneStructureInformationwNovel)
+        gtf_df_gene_list.append(result)
+    # gtf_df_gene_list = Parallel(n_jobs=num_cores)(
+    #     delayed(update_annotation_gene)(geneID, gtf_df, geneStructureInformationwNovel)
+    #     for geneID in geneIDs
+    # )
     gtf_df_geness = pd.concat(gtf_df_gene_list, ignore_index=True)
+    logger.info(output_file)
+    logger.info(gtf_df_geness.shape)
     gtf_df_geness.to_csv(
         output_file, sep="\t", header=False, index=False, quoting=csv.QUOTE_NONE
     )
@@ -1187,4 +1198,5 @@ class ReadMapper:
                 file_name_gtf,
                 self.gtf_df_job,
                 num_cores=1,
+                logger=self.logger,
             )
