@@ -605,6 +605,7 @@ def annotate_genes(
     z_score_threshold=10,
     min_gene_size=50,
     workers=1,
+    logger=None,
 ):
     """
     generate geneStructureInformation either using bamfile alone (leave geneStructureInformation blank) or update existing annotation file using bam file
@@ -714,7 +715,10 @@ def annotate_genes(
         coverage_threshold_exon,
         coverage_threshold_splicing,
         z_score_threshold,
+        logger=None,
     ):
+        logger.info("STARTING UPDATE ANNOTATION ROUND")
+        logger.info(geneID)
         chrom, gene_start, gene_end = (
             geneStructureInformation[geneID][0]["geneChr"],
             geneStructureInformation[geneID][0]["geneStart"],
@@ -751,6 +755,7 @@ def annotate_genes(
                 bamfiles = [pysam.AlignmentFile(bfn, "rb") for bfn in bamfile_path]
         else:
             print("bamfile must be a list or str")
+        logger.info(bamfiles)
         exons_bam = get_non_overlapping_exons(
             bamfiles,
             chrom,
@@ -794,21 +799,40 @@ def annotate_genes(
         annotations = {k: v for result in results for k, v in result.items()}
     # update existing gene annotation using bam file
     else:
+        logger.info("Entering geneIDs")
         geneIDs = list(geneStructureInformation.keys())
         # re-order geneID
         # chunks = np.array_split(geneIDs, workers)
         # geneIDs = [item for sublist in zip(*chunks) for item in sublist]
-        results = Parallel(n_jobs=workers)(
-            delayed(update_annotation)(
+
+        def update_annotation_wrapper(geneID):
+            return update_annotation(
                 geneStructureInformation,
                 geneID,
                 bamfile_path,
                 coverage_threshold_exon,
                 coverage_threshold_splicing,
                 z_score_threshold,
+                logger,
             )
-            for geneID in geneIDs
-        )
+
+        results = []
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(update_annotation_wrapper, geneID) for geneID in geneIDs
+            ]
+            results = [future.result() for future in as_completed(futures)]
+        # results = Parallel(n_jobs=workers)(
+        #     delayed(update_annotation)(
+        #         geneStructureInformation,
+        #         geneID,
+        #         bamfile_path,
+        #         coverage_threshold_exon,
+        #         coverage_threshold_splicing,
+        #         z_score_threshold,
+        #     )
+        #     for geneID in geneIDs
+        # )
         annotations = {k: v for result in results for k, v in result.items()}
     return annotations  # {geneID:[geneInfo, exonInfo, isoformInfo]}
 
@@ -862,6 +886,7 @@ def extract_annotation_info(
             z_score_threshold=z_score_threshold,
             min_gene_size=min_gene_size,
             workers=num_cores,
+            logger=logger,
         )  # no need to add build
         if output is not None:
             with open(output, "wb") as file:
@@ -952,6 +977,7 @@ def extract_annotation_info(
                     z_score_threshold=z_score_threshold,
                     min_gene_size=min_gene_size,
                     workers=num_cores,
+                    logger=logger,
                 )
                 if output is not None:
                     with open(output[:-4] + "updated.pkl", "wb") as file:

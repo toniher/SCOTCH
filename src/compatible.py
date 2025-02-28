@@ -151,11 +151,27 @@ def summarise_annotation(target, logger):
             for f in os.listdir(reference_folder)
             if re.match(r"metageneStructureInformationwNovel_\d+\.pkl", f)
         ]
+
+        if len(file_names_pkl) == 0:
+            file_names_pkl = [
+                os.path.join(reference_folder, f)
+                for f in os.listdir(reference_folder)
+                if re.match(r"metageneStructureInformationwNovel\.pkl", f)
+            ]
+
         file_names_gtf = [
             os.path.join(reference_folder, f)
             for f in os.listdir(reference_folder)
             if re.match(r"gene_annotations_scotch_\d+\.gtf", f)
         ]
+
+        if len(file_names_gtf) == 0:
+            file_names_gtf = [
+                os.path.join(reference_folder, f)
+                for f in os.listdir(reference_folder)
+                if re.match(r"gene_annotations_scotch\.gtf", f)
+            ]
+
         if len(file_names_pkl) > 0 and len(file_names_gtf) > 0:
             # merge pkl annotation file
             logger.info("merging new isoform annotations")
@@ -534,6 +550,7 @@ class ReadMapper:
                                 Read_knownIsoform_scores[readname]
                             )
                 if save:
+                    self.logger.info("SAVING THE READS FILE")
                     # save compatible matrix of each gene, save read-isoform mappings
                     save_compatibleVector_by_gene(
                         geneName,
@@ -549,6 +566,7 @@ class ReadMapper:
                         self.parse,
                     )
                 else:
+                    self.loggger.info("SAMPLE LIST - NOT SAVING")
                     sample_list.append(
                         {
                             "Read_Isoform_compatibleVector": Read_Isoform_compatibleVector_sample,
@@ -1076,7 +1094,7 @@ class ReadMapper:
                 return return_samples
 
     def map_reads_allgenes(
-        self, cover_existing=True, total_jobs=1, current_job_index=0
+        self, cover_existing=True, total_jobs=1, current_job_index=0, logger=None
     ):
         if self.parse == False:
             for (
