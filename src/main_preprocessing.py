@@ -322,7 +322,6 @@ def main():
             total_jobs=args.total_jobs,
             current_job_index=args.job_index,
             workers=args.workers,
-            logger=logger,
         )
         logger.info(
             f"saving annotations with identified novel isoforms  Job: {args.job_index}"

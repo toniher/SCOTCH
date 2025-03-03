@@ -443,11 +443,14 @@ class ReadMapper:
         self.logger.info("STARTING mapping reads")
         Info_multigenes = copy.deepcopy(self.metageneStructureInformation[meta_gene])
         Info_multigenes = sort_multigeneInfo(Info_multigenes)
+        self.logger.info(Info_multigenes)
         bamFilePysams = self.read_bam(chrom=Info_multigenes[0][0]["geneChr"])
         if len(Info_multigenes) == 1:
             Info_singlegene = Info_multigenes[0]
             geneInfo, exonInfo, isoformInfo = Info_singlegene
             n_isoforms = len(isoformInfo)
+            self.logger.info("ONE MULTIGENE")
+            self.logger.info(Info_singlegene)
             Read_novelIsoform = []  # [('read name',[read-exon percentage],[read-exon mapping])]
             Read_knownIsoform = []  # [('read name',[read-isoform mapping])]
             Read_knownIsoform_scores = {}  # [readname: read-isoform mapping scores]
@@ -458,9 +461,11 @@ class ReadMapper:
                 reads = bamFilePysam.fetch(
                     geneInfo["geneChr"], geneInfo["geneStart"], geneInfo["geneEnd"]
                 )
-                self.logger.info(i)
+                self.logger.info("SAMPLE: " + sample)
+                self.logger.info("READS: " + str(len(reads)))
                 if i not in self.qname_dict_list:
                     # Toniher: We skip if not found
+                    self.logger("SKIPPING " + str(i))
                     continue
                 for read in reads:
                     readName, readStart, readEnd = (
@@ -782,6 +787,7 @@ class ReadMapper:
                 return return_list
 
     def map_reads_parse(self, meta_gene, save=True):
+        self.logger.info("STARTING MAPPING READS - PARSE")
         Info_multigenes = copy.deepcopy(self.metageneStructureInformation[meta_gene])
         Info_multigenes = sort_multigeneInfo(Info_multigenes)
         bamFilePysam = self.read_bam()
@@ -1113,7 +1119,6 @@ class ReadMapper:
         total_jobs=1,
         current_job_index=0,
         workers=0,
-        logger=None,
     ):
         if self.parse == False:
             for (
@@ -1122,20 +1127,21 @@ class ReadMapper:
                 if not os.path.exists(compatible_matrix_folder_path):
                     os.makedirs(compatible_matrix_folder_path, exist_ok=True)
         MetaGenes = list(self.metageneStructureInformation.keys())  # all meta genes
-        if total_jobs > 1:
-            step_size = math.ceil(len(MetaGenes) / total_jobs)
-            s = int(list(range(0, len(MetaGenes), step_size))[current_job_index])
-            e = int(s + step_size)
-            MetaGenes_job = MetaGenes[s:e]
-        else:  # total_jobs = 1
-            MetaGenes_job = MetaGenes
+        # if total_jobs > 1:
+        #     step_size = math.ceil(len(MetaGenes) / total_jobs)
+        #     s = int(list(range(0, len(MetaGenes), step_size))[current_job_index])
+        #     e = int(s + step_size)
+        #     MetaGenes_job = MetaGenes[s:e]
+        # else:  # total_jobs = 1
+        MetaGenes_job = MetaGenes
+        self.logger.info(MetaGenes)
         if cover_existing:
-            print(
+            self.logger.info(
                 "If there are existing compatible matrix files, SCOTCH will overwrite them"
             )
             genes_existing = []
         else:
-            print(
+            self.logger.info(
                 "If there are existing compatible matrix files, SCOTCH will not overwrite them"
             )
             if self.parse:
@@ -1187,6 +1193,7 @@ class ReadMapper:
         self.logger.info(
             f"{str(len(MetaGenes_job))} metagenes for job {current_job_index}"
         )
+        # self.logger.info(MetaGenes_job)
         # print('processing ' + str(len(MetaGenes_job)) + ' metagenes for this job')
         if self.parse:
             with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -1195,8 +1202,6 @@ class ReadMapper:
                     for meta_gene in MetaGenes_job
                 ]
                 results = [future.result() for future in as_completed(futures)]
-                # for future in futures:
-                #     print(future.result())
 
             # for meta_gene in MetaGenes_job:
             #     print(meta_gene)
