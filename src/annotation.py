@@ -899,9 +899,7 @@ def extract_annotation_info(
         Genes = list(
             zip(genes.iloc[:, 3].tolist(), genes.iloc[:, 4].tolist())
         )  # id, name
-        logger.info("STARTING TRICKY PART")
-        logger.info(genes)
-        logger.info(Genes)
+
         # generate single gene annotations if not existing
         # TODO: Check why it seems stuck in Parallel
         if not os.path.isfile(output):
@@ -982,6 +980,7 @@ def extract_annotation_info(
                 if output is not None:
                     with open(output[:-4] + "updated.pkl", "wb") as file:
                         pickle.dump(geneStructureInformation, file)
+
     #########group genes into meta-genes########
     if not os.path.isfile(meta_output):
         logger.info("meta gene information does not exist, will generate.")
