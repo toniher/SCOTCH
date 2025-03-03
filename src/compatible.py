@@ -513,9 +513,12 @@ class ReadMapper:
                 ) = (Read_novelIsoform, novel_isoformInfo, Read_knownIsoform)
             # compile output into compatible matrix
             self.logger.info("compiling output")
-            self.logger.info("RN: " + Read_novelIsoform_polished)
-            self.logger.info("RI: " + Read_knownIsoform_polished)
-            self.logger.info("GI: " + geneInfo)
+            self.logger.info("RN:")
+            self.logger.info(Read_novelIsoform_polished)
+            self.logger.info("RI:")
+            self.logger.info(Read_knownIsoform_polished)
+            self.logger.info("GI:")
+            self.logger.info(geneInfo)
             geneName, geneID, geneChr, colNames, Read_Isoform_compatibleVector = (
                 compile_compatible_vectors(
                     Read_novelIsoform_polished, Read_knownIsoform_polished, geneInfo
@@ -1105,7 +1108,12 @@ class ReadMapper:
                 return return_samples
 
     def map_reads_allgenes(
-        self, cover_existing=True, total_jobs=1, current_job_index=0, logger=None
+        self,
+        cover_existing=True,
+        total_jobs=1,
+        current_job_index=0,
+        workers=0,
+        logger=None,
     ):
         if self.parse == False:
             for (
@@ -1181,7 +1189,7 @@ class ReadMapper:
         )
         # print('processing ' + str(len(MetaGenes_job)) + ' metagenes for this job')
         if self.parse:
-            with ThreadPoolExecutor() as executor:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = [
                     executor.submit(self.map_reads_parse, meta_gene, save=True)
                     for meta_gene in MetaGenes_job
@@ -1194,7 +1202,7 @@ class ReadMapper:
             #     print(meta_gene)
             #     self.map_reads_parse(meta_gene, save=True)
         else:
-            with ThreadPoolExecutor() as executor:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = [
                     executor.submit(self.map_reads, meta_gene, save=True)
                     for meta_gene in MetaGenes_job

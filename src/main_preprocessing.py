@@ -321,6 +321,7 @@ def main():
             cover_existing=True,
             total_jobs=args.total_jobs,
             current_job_index=args.job_index,
+            workers=args.workers,
             logger=logger,
         )
         logger.info(
