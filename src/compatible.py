@@ -3,6 +3,7 @@ import csv
 import math
 import pickle
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pysam
 from joblib import Parallel, delayed
@@ -511,6 +512,10 @@ class ReadMapper:
                     Read_knownIsoform_polished,
                 ) = (Read_novelIsoform, novel_isoformInfo, Read_knownIsoform)
             # compile output into compatible matrix
+            self.logger.info("compiling output")
+            self.logger.info("RN: " + Read_novelIsoform_polished)
+            self.logger.info("RI: " + Read_knownIsoform_polished)
+            self.logger.info("GI: " + geneInfo)
             geneName, geneID, geneChr, colNames, Read_Isoform_compatibleVector = (
                 compile_compatible_vectors(
                     Read_novelIsoform_polished, Read_knownIsoform_polished, geneInfo
@@ -564,6 +569,7 @@ class ReadMapper:
                         self.metageneStructureInformationwNovel[meta_gene][0][2],
                         sample_target,
                         self.parse,
+                        self.logger,
                     )
                 else:
                     self.loggger.info("SAMPLE LIST - NOT SAVING")
@@ -654,6 +660,7 @@ class ReadMapper:
                         isoformInfo=None,
                         output_folder=sample_target,
                         parse=self.parse,
+                        logger=self.logger,
                     )
             # save compatible matrix by genes
             return_list = []
@@ -753,6 +760,7 @@ class ReadMapper:
                             ],
                             sample_target,
                             self.parse,
+                            self.logger,
                         )
                     else:
                         return_list.append(
@@ -882,6 +890,7 @@ class ReadMapper:
                         self.metageneStructureInformationwNovel[meta_gene][0][2],
                         sample_target,
                         self.parse,
+                        self.logger,
                     )
                 else:
                     return_sample = {
@@ -961,6 +970,7 @@ class ReadMapper:
                         isoformInfo=None,
                         output_folder=sample_target,
                         parse=self.parse,
+                        logger=self.logger,
                     )
             return_samples = []
             for index in unique_ind:  # loop gene
@@ -1062,6 +1072,7 @@ class ReadMapper:
                             ],
                             sample_target,
                             self.parse,
+                            self.logger,
                         )
                 else:
                     for sample in unique_samples:
@@ -1170,13 +1181,29 @@ class ReadMapper:
         )
         # print('processing ' + str(len(MetaGenes_job)) + ' metagenes for this job')
         if self.parse:
-            for meta_gene in MetaGenes_job:
-                print(meta_gene)
-                self.map_reads_parse(meta_gene, save=True)
+            with ThreadPoolExecutor() as executor:
+                futures = [
+                    executor.submit(self.map_reads_parse, meta_gene, save=True)
+                    for meta_gene in MetaGenes_job
+                ]
+                results = [future.result() for future in as_completed(futures)]
+                # for future in futures:
+                #     print(future.result())
+
+            # for meta_gene in MetaGenes_job:
+            #     print(meta_gene)
+            #     self.map_reads_parse(meta_gene, save=True)
         else:
-            for meta_gene in MetaGenes_job:
-                print(meta_gene)
-                self.map_reads(meta_gene, save=True)
+            with ThreadPoolExecutor() as executor:
+                futures = [
+                    executor.submit(self.map_reads, meta_gene, save=True)
+                    for meta_gene in MetaGenes_job
+                ]
+                results = [future.result() for future in as_completed(futures)]
+
+            # for meta_gene in MetaGenes_job:
+            #     print(meta_gene)
+            #     self.map_reads(meta_gene, save=True)
         for key in MetaGenes:
             if key not in MetaGenes_job:
                 del self.metageneStructureInformationwNovel[key]
