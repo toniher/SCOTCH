@@ -458,43 +458,58 @@ class ReadMapper:
             qname_sample_dict = {}
             for i, bamFilePysam in enumerate(bamFilePysams):
                 sample = "sample" + str(i)
+                self.logger.info(
+                    str(geneInfo["geneChr"])
+                    + ":"
+                    + str(geneInfo["geneStart"])
+                    + "-"
+                    + str(geneInfo["geneEnd"])
+                )
                 reads = bamFilePysam.fetch(
                     geneInfo["geneChr"], geneInfo["geneStart"], geneInfo["geneEnd"]
                 )
+                self.logger.info("WHERE READS")
+                self.logger.info(reads)
                 self.logger.info("SAMPLE: " + sample)
                 self.logger.info("READS: " + str(len(reads)))
                 if i not in self.qname_dict_list:
                     # Toniher: We skip if not found
-                    self.logger("SKIPPING " + str(i))
+                    self.logger.info("SKIPPING " + str(i))
                     continue
-                for read in reads:
-                    readName, readStart, readEnd = (
-                        read.qname,
-                        read.reference_start,
-                        read.reference_end,
-                    )
-                    result = process_read(
-                        read,
-                        self.qname_dict_list[i],
-                        self.lowest_match,
-                        self.lowest_match1,
-                        self.small_exon_threshold,
-                        self.small_exon_threshold1,
-                        self.truncation_match,
-                        Info_singlegene,
-                        self.parse,
-                        self.pacbio,
-                    )
-                    if result is not None:
-                        if self.pacbio:
-                            readName = readName + "_" + str(readEnd - readStart)
-                        qname_sample_dict[readName] = sample
-                    result_novel, result_known, result_known_scores = result
-                    if result_novel is not None:
-                        Read_novelIsoform.append(result_novel)
-                    if result_known is not None:
-                        Read_knownIsoform.append(result_known)
-                        Read_knownIsoform_scores[result_known[0]] = result_known_scores
+                else:
+                    self.logger.info("PROCESSING READS")
+                    for read in reads:
+                        self.logger.info("IN READ:")
+                        self.logger.info(read)
+                        readName, readStart, readEnd = (
+                            read.qname,
+                            read.reference_start,
+                            read.reference_end,
+                        )
+                        result = process_read(
+                            read,
+                            self.qname_dict_list[i],
+                            self.lowest_match,
+                            self.lowest_match1,
+                            self.small_exon_threshold,
+                            self.small_exon_threshold1,
+                            self.truncation_match,
+                            Info_singlegene,
+                            self.parse,
+                            self.pacbio,
+                        )
+                        if result is not None:
+                            if self.pacbio:
+                                readName = readName + "_" + str(readEnd - readStart)
+                            qname_sample_dict[readName] = sample
+                        result_novel, result_known, result_known_scores = result
+                        if result_novel is not None:
+                            Read_novelIsoform.append(result_novel)
+                        if result_known is not None:
+                            Read_knownIsoform.append(result_known)
+                            Read_knownIsoform_scores[result_known[0]] = (
+                                result_known_scores
+                            )
             # expand uncategorized novel reads into Read_knownIsoform
             if len(Read_novelIsoform) > 0:
                 # novel_isoformInfo_polished: novel isoform annotation: {'novelIsoform_7':[0,1,2]}
