@@ -459,7 +459,8 @@ class ReadMapper:
             for i, bamFilePysam in enumerate(bamFilePysams):
                 sample = "sample" + str(i)
                 self.logger.info(
-                    str(geneInfo["geneChr"])
+                    "LOCATION: "
+                    + str(geneInfo["geneChr"])
                     + ":"
                     + str(geneInfo["geneStart"])
                     + "-"
@@ -474,13 +475,13 @@ class ReadMapper:
                 self.logger.info("READS: " + str(len(reads)))
                 if i not in self.qname_dict_list:
                     # Toniher: We skip if not found
-                    self.logger.info("SKIPPING " + str(i))
+                    self.logger.info("SKIPPING: " + str(i))
                     continue
                 else:
                     self.logger.info("PROCESSING READS")
                     for read in reads:
                         self.logger.info("IN READ:")
-                        self.logger.info(read)
+                        self.logger.info(read.qname)
                         readName, readStart, readEnd = (
                             read.qname,
                             read.reference_start,
